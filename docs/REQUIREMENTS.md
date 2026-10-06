@@ -66,7 +66,11 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 
 ### Review gate
 - By default `write` stops after producing `script.txt`, so you can read it before spending ElevenLabs credits.
-- `lecture-forge run <source> --series <slug> --auto` does plan, write and render with no stops. In `--auto` mode the plan isn't reviewed either.
+- `lecture-forge run <source> --series <slug> [--range A-B] [--auto] [--yes]` chains `plan`, `write --all` and `render --all`.
+  - Without `--auto` it stops after making a new plan (the approval gate). Running the same command again continues from your edited plan; render's cost prompt is the script review gate.
+  - `--auto` removes the review stops and the provider-switch prompts, so the plan isn't reviewed either. **Spending still needs consent:** `--yes`, or answering the cost prompt in a terminal. With no terminal and no `--yes`, it writes the scripts and then refuses to render. `--auto --yes` is fully unattended.
+  - **Resumable:** an existing `plan.yaml` is reused (it must be for the same source, otherwise it fails and suggests another `--series`); written and rendered episodes are skipped.
+  - The ElevenLabs key and voice are checked before the first LLM call, so a missing setting fails in seconds, not after the scripts are written.
 
 ## LLM providers (swappable)
 

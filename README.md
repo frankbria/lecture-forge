@@ -4,7 +4,7 @@ Turn textbook chapters into Feynman-style, chalkboard-free audio lectures you ca
 
 PDF / Markdown / text → episode plan → script (written, then critiqued) → ElevenLabs MP3 in your Dropbox.
 
-**Status:** Milestones 1–5 done: config, source loading, PDF slicing, style-guide loader, the `outline`, `plan`, `write` and `render` commands, and swappable LLM providers (Claude Code on your subscription, Claude API, OpenAI) with retry and provider switching. `run` (all steps in one go) is still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+**Status:** Milestones 1–6 done: config, source loading, PDF slicing, style-guide loader, the `outline`, `plan`, `write`, `render` and `run` commands, and swappable LLM providers (Claude Code on your subscription, Claude API, OpenAI) with retry and provider switching. The M6 end-to-end run on a real chapter is still to do: it needs your go-ahead to spend credits. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Usage
 
@@ -18,6 +18,8 @@ lecture-forge plan book.pdf --series ch3 --range 120-185   # plan one chapter of
 lecture-forge write topology --all              # script pass + critique per episode, in order
 lecture-forge write topology --episode 3 --force   # rewrite one episode
 lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\<series title> (asks first)
+lecture-forge run chapter3.pdf --series topo3   # plan, stop for review; run it again to write and render
+lecture-forge run chapter3.pdf --series topo3 --auto --yes   # everything, no stops, spending included
 ```
 
 The planner reads the content itself and breaks at clean concept boundaries, one central idea and at most 30 minutes per episode. Each episode records why it ends where it does.
@@ -26,11 +28,7 @@ The planner reads the content itself and breaks at clean concept boundaries, one
 
 `render` shows the characters it will spend and what's left on your ElevenLabs plan, and asks before spending (`--yes` to skip). It splits each script into pieces, caches every piece so nothing is paid for twice, joins them with ffmpeg and writes tagged MP3s (album = series, track = episode) into your Dropbox. Requires `ffmpeg`.
 
-Planned (not implemented yet):
-
-```bash
-lecture-forge run chapter3.pdf --series topo3 --auto   # everything, no stops
-```
+`run` chains the three steps. Each step skips finished work, so after a failure or Ctrl-C the same command picks up where it stopped. Without `--auto` it stops after a new plan so you can edit it. With `--auto` there are no review stops, but spending ElevenLabs credits still needs `--yes` (otherwise it writes the scripts and asks, or refuses with no terminal).
 
 ## Tests and spending
 

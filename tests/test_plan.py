@@ -361,3 +361,10 @@ def test_plan_records_absolute_source_path(notes, tmp_path, monkeypatch):
     assert yaml.safe_load(out.read_text(encoding="utf-8"))["source"] == str(
         notes.path.resolve()
     )
+
+
+def test_plan_summary_says_1_episode_not_1_episodes(project, book, monkeypatch, capsys):
+    reply = plan_json(episode(1, 6))
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", lambda s, u, p, st: reply)
+    assert main(["plan", str(book.path), "--series", "algebra", "--auto"]) == 0
+    assert "1 episode, ~25 min total" in capsys.readouterr().out
