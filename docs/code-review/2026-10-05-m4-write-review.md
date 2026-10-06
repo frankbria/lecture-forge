@@ -21,7 +21,8 @@
 | 8 | Low | A spoken line beginning exactly "Puzzle answer:" or "Episode summary:" would be read as a heading. | — | Accepted: unnatural phrasing for a lecture; the repair round catches a resulting empty section |
 | 9 | Low | `summary.md` comes from the draft, but the critique may trim content. | — | Accepted: the critique revises wording, not what the episode established |
 | 10 | Low | A relative `source:` you type into `plan.yaml` resolves against the working directory. | — | Accepted: `plan` writes absolute paths |
-| 11 | Low | A `--force` rewrite that fails after pass 1 leaves the new draft/notes next to the old script/summary. | — | Accepted: `script.txt`, `summary.md` and `puzzle_answer.md` stay mutually consistent, which is what the next episode reads |
+| 11 | **High** (raised by codex on #11) | An interrupted `--force` rewrite could leave the old `script.txt` marking the episode done next to a **new** summary and puzzle, and `write_text` truncation could make an interrupted first write look done. | Atomic writes (temp file + `os.replace`); the old marker is removed before publishing; the new `script.txt` goes last. Tested with a simulated crash; a mutation check confirms the test catches it. | Fixed |
+| 13 | Low (codex on #11) | A blank or non-string `source:` in `plan.yaml` crashed with a `TypeError` traceback. | Validated as a `PlanError` with a readable message. | Fixed |
 | 12 | Note | Source content could try to steer the writer. | The writer runs with Read only, in a temp dir holding just the episode's pages. Output is text you review before rendering. | Accepted |
 
 **Result:** 151 unit tests, plus integration tests that run a real two-pass write through Claude Code. A live 2-episode series: **4,031 and 3,969 words (~27 and ~26 min)**, no markdown, no banned phrases, opening problems as the guide asks, and episode 2 closes the loop on episode 1's puzzle.
