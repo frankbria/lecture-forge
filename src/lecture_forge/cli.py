@@ -11,21 +11,23 @@ from lecture_forge.source import open_source, outline
 
 def llm(
     settings: Settings,
-    provider: str,
     system: str,
     user: str,
     pdf: Path | None = None,
     *,
     interactive: bool,
     ask: Callable[[str], str] = input,
-) -> tuple[str, str]:
-    """complete() with retries; once those run out, offer to switch providers.
+) -> tuple[str, Settings]:
+    """complete() on settings.provider; once retries run out, offer to switch providers.
 
-    Returns (text, provider used), so the rest of the run can stay on the switched provider.
+    Returns (text, settings to use from now on). After a switch those settings name the
+    new provider and drop the old provider's model override, so later calls stay on it.
     """
     while True:
         try:
-            return complete(provider, system, user, pdf, settings=settings), provider
+            return complete(
+                settings.provider, system, user, pdf, settings=settings
+            ), settings
         except ProviderError as e:
             if not (interactive and e.alternatives):
                 raise
@@ -37,8 +39,7 @@ def llm(
                 print(
                     f"note: ignoring LECTURE_FORGE_LLM_MODEL={settings.llm_model} for {choice}"
                 )
-                settings = dataclasses.replace(settings, llm_model="")
-            provider = choice
+            settings = dataclasses.replace(settings, provider=choice, llm_model="")
 
 
 def cmd_outline(args: argparse.Namespace) -> None:

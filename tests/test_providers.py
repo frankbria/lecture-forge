@@ -76,11 +76,11 @@ def test_final_failure_lists_usable_alternatives(fake):
 def test_cli_switches_provider_when_user_picks_one(fake, monkeypatch):
     fake([ProviderError("fake", "400")])
     monkeypatch.setitem(providers.PROVIDERS, "anthropic", flaky([]))
-    text, used = llm(
-        settings(anthropic_api_key="k"), "fake", "s", "u",
+    text, now = llm(
+        settings(provider="fake", anthropic_api_key="k"), "s", "u",
         interactive=True, ask=lambda _: "anthropic",
     )  # fmt: skip
-    assert (text, used) == ("ok:u", "anthropic")
+    assert (text, now.provider) == ("ok:u", "anthropic")
 
 
 @pytest.mark.parametrize("interactive,answer", [(False, "anthropic"), (True, "n")])
@@ -88,7 +88,7 @@ def test_cli_gives_up_without_a_choice(fake, interactive, answer):
     fake([ProviderError("fake", "400")])
     with pytest.raises(ProviderError):
         llm(
-            settings(anthropic_api_key="k"), "fake", "s", "u",
+            settings(provider="fake", anthropic_api_key="k"), "s", "u",
             interactive=interactive, ask=lambda _: answer,
         )  # fmt: skip
 
@@ -372,8 +372,13 @@ def test_switching_provider_drops_the_old_providers_model(fake, monkeypatch):
         "openai",
         lambda s, u, p, st: seen.append(st.llm_model) or "ok",
     )
-    text, used = llm(
-        settings(llm_model="claude-opus-5-5", openai_api_key="k"), "fake", "s", "u",
+    text, now = llm(
+        settings(provider="fake", llm_model="claude-opus-5-5", openai_api_key="k"), "s", "u",
         interactive=True, ask=lambda _: "openai",
     )  # fmt: skip
-    assert (text, used, seen) == ("ok", "openai", [""])
+    assert (text, now.provider, seen) == ("ok", "openai", [""])
+    # The next call (e.g. the next episode) carries the switch forward: no prompt, no override.
+    text, later = llm(
+        now, "s", "u2", interactive=True, ask=lambda _: pytest.fail("asked again")
+    )
+    assert (later.provider, later.llm_model, seen) == ("openai", "", ["", ""])
