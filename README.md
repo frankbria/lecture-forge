@@ -16,4 +16,7 @@ lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\to
 lecture-forge run chapter3.pdf --series topo3 --auto   # everything, no stops
 ```
 
-The writing rules are in [prompts/style-guide.md](prompts/style-guide.md).
+## Setup
+
+1. `cp .env.example .env` and fill in `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`, plus an LLM key if you aren't using Claude Code.
+2. Provide your style guide. Either copy it to `prompts/style-guide.md` (git-ignored) or set `STYLE_GUIDE_PATH` in `.env`. It must follow the Part 1 (script) / Part 2 (critique) / Part 3 (input template) structure.
