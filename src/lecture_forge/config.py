@@ -21,6 +21,9 @@ class Settings:
     style_guide_path: Path
     output_dir: Path
     provider: str
+    llm_model: str  # empty: each provider's default model
+    anthropic_api_key: str = field(repr=False)
+    openai_api_key: str = field(repr=False)
 
     def require(self, name: str) -> str:
         """Value of a setting a command can't run without, or a message naming its env var."""
@@ -36,6 +39,9 @@ ENV = {  # field: (env var, default)
     "style_guide_path": ("STYLE_GUIDE_PATH", "prompts/style-guide.md"),
     "output_dir": ("LECTURE_FORGE_OUTPUT_DIR", "/mnt/d/Dropbox/Lectures"),
     "provider": ("LECTURE_FORGE_PROVIDER", "claude-code"),
+    "llm_model": ("LECTURE_FORGE_LLM_MODEL", ""),
+    "anthropic_api_key": ("ANTHROPIC_API_KEY", ""),
+    "openai_api_key": ("OPENAI_API_KEY", ""),
 }
 
 

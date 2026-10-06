@@ -49,15 +49,18 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 
 ## LLM providers (swappable)
 
-All three providers implement one interface: `complete(system, user, pdf: (path, pages) | None) -> str`.
+All three providers implement one interface: `complete(provider, system, user, pdf=None) -> str` (`src/lecture_forge/providers.py`).
 
-| Provider | Selector | Auth | How PDFs are passed |
-|---|---|---|---|
-| Claude Code headless (**default**) | `claude-code` | your subscription (`claude -p`) | The prompt points it at a temporary PDF cut to the episode's pages, which it reads with its Read tool. The model sees the pages, so equations survive. |
-| Claude API | `anthropic` | `ANTHROPIC_API_KEY` | The sliced PDF is sent as a native `document` block. |
-| OpenAI | `openai` | `OPENAI_API_KEY` | Text extracted with pymupdf (equations may come out degraded; a warning is logged). |
+| Provider | Selector | Auth | Default model | How PDFs are passed |
+|---|---|---|---|---|
+| Claude Code headless (**default**) | `claude-code` | your subscription (`claude -p`) | your Claude Code default | The sliced PDF is copied into a temporary directory, which it reads with the Read tool (the only tool enabled; reads outside that directory are denied). |
+| Claude API | `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, effort `high` | Native `document` block. Server-side refusal fallback is on (`fallbacks: "default"`). |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.5` | Native `input_file` in the Responses API. |
 
-- Selected with `--provider` or in `config.toml`. Models are configurable for each provider.
+- Every provider sees the actual PDF pages, so there is **no text extraction** on any LLM path.
+- `LECTURE_FORGE_LLM_MODEL` overrides the model for whichever provider is in use.
+- `claude -p` runs with `--setting-sources ""`, so your user hooks, plugins, output styles and `CLAUDE.md` don't leak into the scripts. `--bare` is **not** used, because it only accepts API-key auth and would ignore your subscription.
+- **Failures:** transient errors (429, 5xx, network, timeout) are retried 3 times with exponential backoff (10 s, 20 s, 40 s). The SDKs' own retries are turned off, so there's one retry policy. Permanent errors (other 4xx, a refusal, a cut-off response, a missing key or CLI) fail immediately. On final failure the error lists the other providers you can use. Interactively, the CLI asks whether to switch, and the provider you pick stays in use for the rest of the run. In `--auto` mode, or with no alternatives, the run stops.
 - Markdown and text sources always go in as plain text.
 - **Subscription billing guard:** if Claude Code finds `ANTHROPIC_API_KEY` in its environment, it uses that key **instead of your subscription**. The `claude-code` provider therefore runs `claude -p` with `ANTHROPIC_API_KEY` (and `ANTHROPIC_AUTH_TOKEN`) removed from the environment it passes, and a test enforces this. Settings are read from `.env` with `dotenv_values`, which never exports them into `os.environ`; the app must never call `load_dotenv()`.
 - The PDF is always sliced to the episode's page range first, which keeps you under provider page limits and keeps cost down.
