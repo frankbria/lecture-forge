@@ -1,0 +1,17 @@
+[project]
+name = "lecture-forge"
+version = "0.1.0"
+description = "Turn textbook chapters into chalkboard-free audio lectures"
+readme = "README.md"
+authors = [
+    { name = "frankbria", email = "frank.bria@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+lecture-forge = "lecture_forge:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
