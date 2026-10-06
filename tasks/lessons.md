@@ -9,3 +9,5 @@ Process and tooling lessons from working on this repo. Code and product follow-u
 - **Untracking a file deletes it from other checkouts.** Merging a `git rm --cached` commit makes `git pull` remove the file from any working tree whose HEAD still tracks it. After merging such a change, re-copy the file (the style guide's source is `D:\Dropbox\Claude\audio-lecture-style-guide.md`).
 - **`codex review` reads the whole checkout,** `.env` included. Run it from a clean `git worktree` that has no secrets or private prompts. It also can't combine `--base` with custom instructions.
 - **The pre-commit hook in `.git/hooks` applies to every branch.** Branches that predate `.pre-commit-config.yaml` need `PRE_COMMIT_ALLOW_NO_CONFIG=1`.
+- **Check for conflict markers before `git rebase --continue`.** A failed file write followed by `git add` staged `.env.example` with `<<<<<<<` markers still in it (caught and amended before pushing). Run `git diff --check` or grep for markers after resolving.
+- **opencode/GLM stalled on every review in this run** (exit 75, even run sequentially). codex did all three PRs. Re-test opencode before assuming it's back.
