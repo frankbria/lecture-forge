@@ -118,7 +118,8 @@ def cmd_plan(args: argparse.Namespace) -> None:
             f"{n}. {e['title']}  {unit} {e['start']}-{e['end']}  ~{e['est_minutes']} min"
         )
     total = sum(e["est_minutes"] for e in episodes)
-    print(f"{len(episodes)} episodes, ~{total} min total -> {out}")
+    n = len(episodes)
+    print(f"{n} episode{'s' * (n != 1)}, ~{total} min total -> {out}")
     print("Review and edit the plan before writing scripts.")
 
 
