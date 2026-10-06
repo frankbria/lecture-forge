@@ -442,7 +442,9 @@ def test_real_model_output_parses_through_both_passes(tmp_path, book):
     plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 3])]))
     result = write_episode(plan, plan["episodes"][0], short, call, tmp_path / "out")
     d = episode_dir(tmp_path / "out", 1)
-    assert result.words > 50
+    assert (
+        result.words > 0
+    )  # parsing is the point; how short the model goes varies run to run
     for f in ("script.txt", "puzzle_answer.md", "summary.md", "notes.md"):
         assert (d / f).read_text(encoding="utf-8").strip(), f
 

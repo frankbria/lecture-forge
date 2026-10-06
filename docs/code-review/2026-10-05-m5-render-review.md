@@ -18,5 +18,6 @@
 | 10 | Low | The balance lookup could fail (network, API change). | Returns `None` with a warning; render still asks for confirmation. | Accepted |
 | 11 | Note | Old cached pieces accumulate in `episodes/NN/audio/` after edits (~1 MB per minute of audio). | — | Accepted: local disk only; delete the folder to reclaim space |
 | 12 | Note | Two renders of the same episode at once aren't coordinated. | — | Accepted: single-user CLI |
+| 13 | **High** (raised by the owner) | Test-time spending was guarded only by convention: a future unit test building the real adapter would spend credits whenever tests ran locally (where `.env` holds real keys). | `tests/conftest.py` blocks real (or missing) keys for ElevenLabs, Anthropic and OpenAI clients in every test not marked `paid`; `paid` tests run only with `LECTURE_FORGE_PAID_TESTS=1`. Guard tests plus a mutation check; the opt-in path was verified for free with fake keys (real 401s, no spend). The policy is written down in REQUIREMENTS. | Fixed |
 
 **Verification:** 188 unit tests, with joins and tags checked by real ffmpeg/ffprobe on real MP3 bytes. One paid integration test (opt-in). A real tiny render: two real `eleven_v3` pieces in your voice (392 characters), joined into a 29.1 s MP3 with correct tags; a second run was skipped at 0 characters.

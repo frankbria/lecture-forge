@@ -97,6 +97,22 @@ All three providers implement one interface: `complete(provider, system, user, p
 - Plain files under `series/<slug>/` (git-ignored). No database: the whole state is one plan plus a few files per episode.
 - Episode N+1 reads `summary.md` and `puzzle_answer.md` from episode N.
 
+## Testing and spending policy
+
+Credits and per-use API charges are spent **only when they have to be**. Each kind of run has a fixed budget:
+
+| Run | ElevenLabs | Anthropic / OpenAI API | Claude Code |
+|---|---|---|---|
+| CI (every push and PR) | **0**: no secrets exist in CI | **0** | not installed |
+| Pre-commit hook, `pytest`, `pytest -m integration` | **0** | **0** (fake-key 401 checks only, which are free) | your subscription |
+| `LECTURE_FORGE_PAID_TESTS=1 pytest -m paid` | ~70 characters | a few cents | your subscription |
+| `lecture-forge render` | the cost it shows you, **only after you confirm** | — | — |
+
+- **Enforced, not just conventional:** `tests/conftest.py` blocks every test from building an ElevenLabs, Anthropic or OpenAI client with one of your real keys (or with no key, since the SDKs would then read the environment) unless the test is marked `paid` **and** `LECTURE_FORGE_PAID_TESTS=1` is set. `tests/test_spend_guard.py` checks the guard, and a mutation check confirms it fails when the guard is off.
+- **When to run the paid tests:** only when the code that talks to a billed API changes, i.e. the ElevenLabs adapter in `render.py`, the `anthropic`/`openai` paths in `providers.py`, or an upgrade of those SDKs. Not for unrelated changes.
+- **Demos and reviews** use cached audio (`render --force` rebuilds an MP3 from cached pieces at 0 characters) or the ~400-character two-piece render, and the latter only when splitting, joining or tagging changes. A full real episode is rendered only with your explicit go-ahead.
+- **New tests that touch a billed API** must use a fake key or be marked `paid`. The guard turns a mistake into a failing test, not a charge.
+
 ## Stack
 
 - Python 3.12, `uv`, argparse (CLI), PyYAML, pymupdf (slicing and text extraction), anthropic, openai, elevenlabs, mutagen (ID3 tags), ffmpeg (join).

@@ -31,7 +31,10 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-markers = ["integration: calls real external services (LLM / ElevenLabs)"]
+markers = [
+    "integration: calls real external services (Claude Code on your subscription; free error-path calls)",
+    "paid: bills a per-use API (ElevenLabs, Anthropic API, OpenAI); skipped unless LECTURE_FORGE_PAID_TESTS=1",
+]
 
 [tool.coverage.run]
 source = ["lecture_forge"]

@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 
 import pytest
@@ -359,8 +358,7 @@ def test_render_more_than_left_on_plan_is_refused(project, capsys, monkeypatch):
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(os.environ.get("LECTURE_FORGE_PAID_TESTS") != "1",
-                    reason="spends ElevenLabs credits; set LECTURE_FORGE_PAID_TESTS=1")  # fmt: skip
+@pytest.mark.paid  # ~70 ElevenLabs characters
 def test_real_elevenlabs_returns_playable_mp3(tmp_path):
     from lecture_forge.config import load_settings
 

@@ -32,6 +32,15 @@ Planned (not implemented yet):
 lecture-forge run chapter3.pdf --series topo3 --auto   # everything, no stops
 ```
 
+## Tests and spending
+
+```bash
+uv run pytest                      # unit + free integration tests: never spends ElevenLabs or API credits
+LECTURE_FORGE_PAID_TESTS=1 uv run pytest -m paid   # ~70 ElevenLabs characters + a few cents of API usage
+```
+
+Run the paid tests only when the ElevenLabs or API client code changes. A guard in `tests/conftest.py` blocks any other test from using your real keys. CI has no keys at all. See "Testing and spending policy" in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+
 ## Setup
 
 1. `cp .env.example .env` and fill in `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`, plus an LLM key if you aren't using Claude Code.
