@@ -191,3 +191,133 @@ def test_claude_code_cannot_read_outside_its_sandbox(tmp_path):
         settings=settings(), attempts=1,
     )  # fmt: skip
     assert "CANARY-7f3a" not in out
+
+
+# --- claude-code wiring, against a fake `claude` executable on PATH ----------------
+
+FAKE_CLAUDE = """#!{python}
+import json, os, pathlib, sys, time
+time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
+pathlib.Path(os.environ["FAKE_CLAUDE_LOG"]).write_text(json.dumps({{
+    "argv": sys.argv[1:],
+    "has_api_key": "ANTHROPIC_API_KEY" in os.environ,
+    "stdin": sys.stdin.read(),
+    "files": sorted(os.listdir(".")),
+}}))
+sys.stdout.write(os.environ["FAKE_CLAUDE_STDOUT"])
+sys.stderr.write(os.environ.get("FAKE_CLAUDE_STDERR", ""))
+sys.exit(int(os.environ.get("FAKE_CLAUDE_EXIT", "0")))
+"""
+
+
+@pytest.fixture
+def fake_claude(tmp_path, monkeypatch):
+    """Put a scripted `claude` first on PATH; returns (set_reply, read_log)."""
+    import json
+    import sys
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    exe = bindir / "claude"
+    exe.write_text(FAKE_CLAUDE.format(python=sys.executable))
+    exe.chmod(0o755)
+    log = tmp_path / "claude-call.json"
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-be-scrubbed")
+
+    def reply(stdout, exit_code=0, stderr="", sleep=0):
+        out = stdout if isinstance(stdout, str) else json.dumps(stdout)
+        monkeypatch.setenv("FAKE_CLAUDE_STDOUT", out)
+        monkeypatch.setenv("FAKE_CLAUDE_EXIT", str(exit_code))
+        monkeypatch.setenv("FAKE_CLAUDE_STDERR", stderr)
+        monkeypatch.setenv("FAKE_CLAUDE_SLEEP", str(sleep))
+
+    return reply, lambda: json.loads(log.read_text())
+
+
+def test_claude_code_invocation_is_isolated_and_billed_to_subscription(
+    fake_claude, theorem_pdf
+):
+    reply, call = fake_claude
+    reply({"is_error": False, "result": "the script"})
+    out = complete(
+        "claude-code",
+        "SYS",
+        "write it",
+        theorem_pdf,
+        settings=settings(llm_model="opus"),
+    )
+    c = call()
+    assert out == "the script"
+    assert c["has_api_key"] is False  # subscription, not the API key
+    args = c["argv"]
+    assert (
+        args[args.index("--setting-sources") + 1] == ""
+    )  # no user hooks/styles/CLAUDE.md
+    assert args[args.index("--tools") + 1] == "Read"
+    assert args[args.index("--system-prompt") + 1] == "SYS"
+    assert args[args.index("--model") + 1] == "opus"
+    assert (
+        c["stdin"].startswith("write it") and "source.pdf" in c["stdin"]
+    )  # prompt via stdin
+    assert c["files"] == ["source.pdf"]  # only the sliced PDF is in its sandbox
+
+
+def test_claude_code_without_pdf_or_model(fake_claude):
+    reply, call = fake_claude
+    reply({"is_error": False, "result": "ok"})
+    assert complete("claude-code", "s", "u", settings=settings()) == "ok"
+    c = call()
+    assert "--model" not in c["argv"] and c["files"] == [] and c["stdin"] == "u"
+
+
+@pytest.mark.parametrize(
+    "status,retryable",
+    [(429, True), (529, True), (None, True), (400, False), (401, False)],
+)
+def test_claude_code_error_status_decides_retry(fake_claude, status, retryable):
+    reply, _ = fake_claude
+    reply({"is_error": True, "result": "API Error", "api_error_status": status})
+    delays = []
+    with pytest.raises(ProviderError, match="API Error") as info:
+        complete(
+            "claude-code",
+            "s",
+            "u",
+            settings=settings(),
+            base_delay=1,
+            sleep=delays.append,
+        )
+    assert info.value.retryable is retryable
+    assert delays == ([1, 2, 4] if retryable else [])
+
+
+def test_claude_code_garbage_output_is_retryable_and_shows_stderr(fake_claude):
+    reply, _ = fake_claude
+    reply("not json", exit_code=1, stderr="boom: usage limit")
+    with pytest.raises(ProviderError, match="exit 1: boom: usage limit") as info:
+        complete("claude-code", "s", "u", settings=settings(), attempts=1)
+    assert info.value.retryable
+
+
+def test_claude_code_timeout_is_retryable(fake_claude, monkeypatch):
+    reply, _ = fake_claude
+    reply({"is_error": False, "result": "late"}, sleep=3)
+    monkeypatch.setattr(providers, "TIMEOUT_S", 0.5)
+    with pytest.raises(ProviderError, match="timed out") as info:
+        complete("claude-code", "s", "u", settings=settings(), attempts=1)
+    assert info.value.retryable
+
+
+@pytest.mark.parametrize(
+    "status,retryable", [(429, True), (503, True), (None, True), (400, False)]
+)
+def test_sdk_error_classification(status, retryable):
+    class SDKError(Exception):
+        pass
+
+    e = SDKError("x")
+    if status is not None:
+        e.status_code = status
+    assert providers._api_error("anthropic", e).retryable is retryable
