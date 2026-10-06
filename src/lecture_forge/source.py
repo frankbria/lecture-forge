@@ -8,7 +8,9 @@ from typing import Literal
 import pymupdf
 
 TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
-HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+HEADING = re.compile(
+    r"^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$"
+)  # closing #s need a space before them
 
 
 @dataclass(frozen=True)

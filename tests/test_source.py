@@ -124,3 +124,13 @@ def test_slice_pdf_keeps_only_requested_pages(book, tmp_path):
 def test_slice_rejects_text_source(notes, tmp_path):
     with pytest.raises(ValueError, match="PDF"):
         slice_pdf(open_source(notes), 1, 2, tmp_path / "x.pdf")
+
+
+def test_heading_keeps_hashes_that_belong_to_the_title(tmp_path):
+    p = tmp_path / "langs.md"
+    p.write_text("# C#\n## F# basics ##\n### Closed ###\n")
+    assert outline(open_source(p)) == [
+        (1, "C#", 1),
+        (2, "F# basics", 2),
+        (3, "Closed", 3),
+    ]
