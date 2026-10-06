@@ -20,9 +20,16 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 ```
 
 ### 1. `plan` — split the source into episodes
-- `lecture-forge plan <source> --series <slug>`
-- The LLM reads the TOC, PDF bookmarks or headings and proposes episodes. Each episode has exactly one central idea (style guide: "one central idea per episode").
-- It writes `series/<slug>/plan.yaml`: series title and author, then a list of episodes with `n`, `title`, `central_idea`, `source_range` (PDF pages, or a heading range for md/txt) and `listener_notes`.
+- `lecture-forge plan <source> --series <slug> [--range A-B] [--force] [--auto]`
+- The LLM reads the **content itself** (the PDF pages, or numbered lines for md/txt) and proposes where the breaks go. Bookmarks and headings are passed as hints only, so a section holding several ideas is split and short sections forming one idea are merged. **Break rules:**
+  1. **Content:** exactly one central idea per episode (style guide).
+  2. **Timing:** each episode targets 20–30 minutes of audio. The planner gets a word count for every page, so it can tell dense pages from light ones, and estimates `est_minutes`. **An episode over 30 minutes is rejected**: split it instead.
+  3. **Clean concept breaks:** never mid-proof, mid-example or mid-derivation. Each episode records a `break_reason`.
+  - Front matter, exercises and back matter may be skipped (gaps between episodes are allowed). Episodes are in source order and don't overlap.
+- `--range A-B` plans only those pages (or lines), e.g. one chapter of a full-book PDF. Ranges in the plan are always absolute positions in the source.
+- **Validation:** the LLM's plan is untrusted input. Ranges must exist in the source, be in order and not overlap, and `est_minutes` must be at most 30. An invalid plan gets **one** repair attempt, with the problems listed for the model, and then the command fails.
+- It writes `series/<slug>/plan.yaml`: the series title, author and source, then the episodes, each with `n`, `title`, `central_idea`, `pages` (or `lines`), `est_minutes`, `break_reason` and `listener_notes`. An existing plan is never overwritten without `--force`, because it may hold your edits.
+- Provider failures follow the retry and switch policy (see LLM providers). `--auto` never prompts.
 - **Approval gate:** the command stops here. You edit the YAML (reorder, merge, split, change ranges) before running `write`.
 
 ### 2. `write` — script pass, then critique pass
@@ -40,7 +47,7 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 - `eleven_v3` does **not** support request stitching. Instead, every piece uses the same voice settings and the same fixed `seed`. That reduces variation between pieces but doesn't guarantee identical delivery. The joins fall on paragraph breaks, where a pause is natural anyway. The pieces are joined with ffmpeg.
 - For models that **do** support stitching (`eleven_v4`, `eleven_multilingual_v2`), `render` automatically sends the previous pieces' `previous_request_ids`. If the `eleven_v3` joins are audible, setting `ELEVENLABS_MODEL_ID` to one of those models is therefore all it takes.
 - ID3 tags: album = series title, track = episode number, title = episode title, artist = "lecture-forge".
-- Output: `<output_dir>/<series>/NN - <title>.mp3`. The default `output_dir` is `/mnt/d/Dropbox/Lectures` (`D:\Dropbox\Lectures`).
+- Output: `<output_dir>/<series>/NN - <title>.mp3`. Titles come from the LLM-written plan, so they're sanitized for filenames (no path separators, reserved characters or Windows-reserved names) before use. The default `output_dir` is `/mnt/d/Dropbox/Lectures` (`D:\Dropbox\Lectures`).
 - Running it again is safe: an episode whose `script.txt` hash hasn't changed is skipped, so credits aren't spent twice.
 
 ### Review gate
