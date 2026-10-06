@@ -5,6 +5,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from lecture_forge import render
 from lecture_forge.config import ConfigError, Settings, load_settings
 from lecture_forge.plan import MAX_MINUTES, PlanError, load_plan, make_plan, write_plan
 from lecture_forge.providers import ProviderError, complete
@@ -176,6 +177,64 @@ def cmd_write(args: argparse.Namespace) -> None:
     print("Review the script.txt files before rendering audio.")
 
 
+def cmd_render(args: argparse.Namespace) -> None:
+    series_dir = _check_series(args.series)
+    plan_path = series_dir / "plan.yaml"
+    if not plan_path.is_file():
+        raise FileNotFoundError(
+            f"{plan_path} not found; run `lecture-forge plan` first"
+        )
+    plan = load_plan(plan_path)
+    settings = load_settings()
+    settings.require("elevenlabs_api_key")
+    settings.require("voice_id")
+    if args.episode is not None:
+        todo = [e for e in plan["episodes"] if e["n"] == args.episode]
+        if not todo:
+            raise ValueError(f"the plan has no episode {args.episode}")
+    else:
+        todo = plan["episodes"]
+    ready, total = [], 0
+    for ep in todo:
+        if not (episode_dir(series_dir, ep["n"]) / "script.txt").exists():
+            if args.episode is not None:
+                raise render.RenderError(
+                    f"write episode {ep['n']} first (lecture-forge write)"
+                )
+            print(f"Episode {ep['n']}: {ep['title']}: not written yet, skipping")
+            continue
+        chars = render.cost(plan, ep, series_dir, settings)
+        print(f"Episode {ep['n']}: {ep['title']}: {chars:,} characters to synthesize")
+        ready.append(ep)
+        total += chars
+    left = render.characters_left(settings)
+    balance = f"; {left:,} left on your ElevenLabs plan" if left is not None else ""
+    print(f"Total: {total:,} characters ({settings.model_id}){balance}")
+    if left is not None and total > left:
+        raise render.RenderError(
+            f"this needs {total:,} characters but your plan has only {left:,} characters left"
+        )
+    if total and not args.yes:  # spending money always needs a yes
+        if not sys.stdin.isatty():
+            raise render.RenderError(
+                "rendering spends ElevenLabs credits; pass --yes to confirm"
+            )
+        if input("Render? [y/N] ").strip().lower() not in ("y", "yes"):
+            raise render.RenderError("cancelled; nothing was spent")
+    tts = render.elevenlabs_tts(settings)
+    for ep in ready:
+        print(f"Episode {ep['n']}: {ep['title']}: rendering...", flush=True)
+        res = render.render_episode(
+            plan, ep, series_dir, settings, tts, force=args.force
+        )
+        if res.skipped:
+            print(f"  already rendered: {res.path}")
+        else:
+            print(
+                f"  -> {res.path}  ({res.billed:,} characters billed, {res.reused} pieces reused)"
+            )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lecture-forge")
     sub = parser.add_subparsers(required=True)
@@ -209,12 +268,26 @@ def main(argv: list[str] | None = None) -> int:
         "--auto", action="store_true", help="never prompt (no provider switching)"
     )
     p.set_defaults(func=cmd_write)
+    p = sub.add_parser("render", help="render written scripts to MP3 with ElevenLabs")
+    p.add_argument("series")
+    which = p.add_mutually_exclusive_group(required=True)
+    which.add_argument("--episode", type=int, help="render one episode")
+    which.add_argument(
+        "--all", action="store_true", help="render every written episode"
+    )
+    p.add_argument(
+        "--force", action="store_true", help="re-join and re-tag even if unchanged"
+    )
+    p.add_argument(
+        "--yes", action="store_true", help="don't ask before spending credits"
+    )
+    p.set_defaults(func=cmd_render)
     args = parser.parse_args(argv)
     try:
         args.func(args)
     except (
         FileNotFoundError, FileExistsError, ValueError,
-        ConfigError, StyleGuideError, ProviderError, PlanError, WriteError,
+        ConfigError, StyleGuideError, ProviderError, PlanError, WriteError, render.RenderError,
     ) as e:  # fmt: skip
         print(f"error: {e}", file=sys.stderr)
         return 1

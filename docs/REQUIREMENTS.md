@@ -45,14 +45,24 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 - Provider failures follow the retry and switch policy; a switch carries across the episodes of one run.
 
 ### 3. `render` — text to speech
-- `lecture-forge render <slug> [--episode N | --all]`
-- Uses ElevenLabs with model **`eleven_v3`** (the default; overridable with `ELEVENLABS_MODEL_ID`).
-- `eleven_v3` accepts at most **5,000 characters per request**, so the script is split at paragraph boundaries into pieces of 5,000 characters or fewer. A 25-minute episode is about 25,000 characters, which is 5–6 requests. The limit is looked up per model, so switching models adjusts the piece size.
-- `eleven_v3` does **not** support request stitching. Instead, every piece uses the same voice settings and the same fixed `seed`. That reduces variation between pieces but doesn't guarantee identical delivery. The joins fall on paragraph breaks, where a pause is natural anyway. The pieces are joined with ffmpeg.
-- For models that **do** support stitching (`eleven_v4`, `eleven_multilingual_v2`), `render` automatically sends the previous pieces' `previous_request_ids`. If the `eleven_v3` joins are audible, setting `ELEVENLABS_MODEL_ID` to one of those models is therefore all it takes.
-- ID3 tags: album = series title, track = episode number, title = episode title, artist = "lecture-forge".
-- Output: `<output_dir>/<series>/NN - <title>.mp3`. Titles come from the LLM-written plan, so they're sanitized for filenames (no path separators, reserved characters or Windows-reserved names) before use. The default `output_dir` is `/mnt/d/Dropbox/Lectures` (`D:\Dropbox\Lectures`).
-- Running it again is safe: an episode whose `script.txt` hash hasn't changed is skipped, so credits aren't spent twice.
+- `lecture-forge render <slug> (--episode N | --all) [--force] [--yes]`
+- ElevenLabs with model **`eleven_v3`** (the default; `ELEVENLABS_MODEL_ID` overrides it), your voice (`ELEVENLABS_VOICE_ID`), MP3 at 44.1 kHz / 128 kbps.
+- **Cost control (it spends money):**
+  - Before any call it prints the characters to synthesize per episode, the total, and the balance left on your plan (read from your ElevenLabs subscription).
+  - A total over the balance is refused.
+  - Otherwise it asks `Render? [y/N]`. `--yes` skips the question, and with no terminal it never spends without `--yes`.
+  - Only pieces not already cached count toward the cost.
+- **Splitting:** pieces of at most the model's per-request limit (`eleven_v3` 5,000; v4 and multilingual v2 10,000; flash 30–40,000; unknown models 5,000). Pieces are packed from whole paragraphs. A paragraph over the limit is split at sentences, then words.
+- **Continuity across pieces:** every piece uses the same fixed `seed`, which reduces variation but doesn't guarantee identical delivery. Models that support stitching automatically get the **3** most recent `previous_request_ids`. `eleven_v3` rejects stitching, so it gets none. The joins fall on paragraph breaks.
+- **Never pay twice:** each piece is cached in `episodes/NN/audio/` under a hash of (model, voice, seed, format, text), and stored only once fully on disk. A failed render resumes from the cached pieces. After an edit, only the pieces whose text changed are synthesized again.
+- **Skip when unchanged:** `render.json` records the script hash, model, voice and output path. An unchanged episode is skipped. `--force` rebuilds the file from the cache without new spending.
+- **Join and tag:** ffmpeg concatenates the pieces and writes ID3v2.3 tags (title, album = series title, artist and album artist = author, track `n/last`, genre Speech). The file is published atomically, so Dropbox never syncs a half-written file.
+- **Output:** `<output_dir>/<series title>/NN - <episode title>.mp3` (default `output_dir` `/mnt/d/Dropbox/Lectures`, i.e. `D:\Dropbox\Lectures`).
+  - Titles come from the LLM-written plan, so they're sanitized for Windows: no `<>:"/\|?*` or control characters, no trailing dots, reserved names (CON, COM1…) prefixed, at most 120 characters.
+  - The output folder is created only if its parent exists. If the drive isn't mounted, the command fails rather than inventing a Linux-only folder.
+  - If an episode was renamed since it was last rendered, its previous MP3 is removed: only an `.mp3` for that episode number inside the output folder, so the playlist never has duplicates.
+- Transient ElevenLabs errors (408, 409, 429, 5xx, network) are retried with backoff (10, 20, 40 s). Other errors fail with ElevenLabs' message.
+- Tests: the real ElevenLabs integration test runs only with `LECTURE_FORGE_PAID_TESTS=1`, so routine test runs never spend credits.
 
 ### Review gate
 - By default `write` stops after producing `script.txt`, so you can read it before spending ElevenLabs credits.
