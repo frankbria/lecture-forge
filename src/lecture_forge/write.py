@@ -1,5 +1,6 @@
 """Write one episode: a script pass (style guide Part 1), then a critique pass (Part 2)."""
 
+import os
 import re
 import tempfile
 from collections.abc import Callable
@@ -216,7 +217,10 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
 
 
 def _save(path: Path, text: str) -> None:
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    """Write via a temp file and an atomic rename: a crash never leaves a half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text.strip() + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def write_episode(
@@ -264,6 +268,9 @@ def write_episode(
             lambda found: _check_critique(found, draft["SCRIPT"]),
         )
     script = _spoken(crit["Revised script"])
+    # A rewrite is "not done" while its files change, so an interrupted rewrite can never
+    # leave an old script.txt marking new (mismatched) continuity files as finished.
+    (d / "script.txt").unlink(missing_ok=True)
     _save(d / "critique.md", crit_text)
     _save(d / "puzzle_answer.md", crit.get("PUZZLE ANSWER") or draft["PUZZLE ANSWER"])
     _save(d / "summary.md", draft["EPISODE SUMMARY"])

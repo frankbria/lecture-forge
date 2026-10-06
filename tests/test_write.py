@@ -1,5 +1,6 @@
 import re
 import shutil
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -501,3 +502,59 @@ def test_critique_is_told_not_to_add_commentary(tmp_path, book):
 
     run(tmp_path, book, call)
     assert "nothing after" in systems[1].lower()
+
+
+# --- review fixes (codex on PR #11) --------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [None, "", 7, ["a.pdf"]])
+def test_load_plan_rejects_missing_or_odd_source(tmp_path, book, value):
+    path = make_plan_file(tmp_path, book, [(1, [1, 3])])
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["source"] = value
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    with pytest.raises(PlanError, match="source"):
+        load_plan(path)
+
+
+def test_interrupted_rewrite_never_leaves_a_done_episode_with_mixed_files(
+    tmp_path, book, monkeypatch
+):
+    from lecture_forge import write as write_mod
+
+    replies = iter([draft_reply(summary="OLD SUMMARY"), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))  # episode 1 done, old continuity
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    real_replace = write_mod.os.replace
+
+    def crash_on_script(src, dst):
+        if str(dst).endswith("script.txt"):
+            raise KeyboardInterrupt  # power cut just before the episode is marked done
+        real_replace(src, dst)
+
+    monkeypatch.setattr(write_mod.os, "replace", crash_on_script)
+    replies = iter([draft_reply(summary="NEW SUMMARY"), critique_reply()])
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, book, lambda s, u, p: next(replies))
+    # Either still done with consistent old files, or not done at all: here it must be not done.
+    assert not (d / "script.txt").exists()
+    assert "NEW SUMMARY" in (d / "summary.md").read_text(encoding="utf-8")
+    with pytest.raises(WriteError, match="episode 1 first"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("ran"), n=2)
+
+
+def test_files_are_published_atomically(tmp_path, book, monkeypatch):
+    from lecture_forge import write as write_mod
+
+    published = []
+    real_replace = write_mod.os.replace
+    monkeypatch.setattr(
+        write_mod.os,
+        "replace",
+        lambda s, d: (published.append(Path(d).name), real_replace(s, d)),
+    )
+    replies = iter([draft_reply(), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    assert published[-1] == "script.txt"  # the done marker goes last
+    assert {"critique.md", "puzzle_answer.md", "summary.md"} <= set(published)
+    assert not list(episode_dir(tmp_path / "series" / "algebra", 1).glob("*.tmp"))

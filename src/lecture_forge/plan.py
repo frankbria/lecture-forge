@@ -213,8 +213,13 @@ def load_plan(path: Path) -> dict:
         raise PlanError(f"{path} is not valid YAML: {e}") from e
     if not isinstance(data, dict) or not isinstance(data.get("episodes"), list):
         raise PlanError(f"{path} has no episodes list")
+    source = data.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise PlanError(
+            f"{path}: source is missing; it must be the path of the book or notes"
+        )
     try:
-        src = open_source(data.get("source", ""))
+        src = open_source(source)
     except (FileNotFoundError, ValueError) as e:
         raise PlanError(
             f"{path}: source {data.get('source')!r} can't be opened ({e})"
