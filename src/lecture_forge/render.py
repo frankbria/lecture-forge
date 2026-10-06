@@ -32,6 +32,7 @@ CHAR_LIMITS = {  # characters per request (ElevenLabs model docs)
 }
 NO_STITCHING = {"eleven_v3"}  # rejects previous_request_ids
 MAX_PREVIOUS = 3  # ElevenLabs accepts at most 3 previous_request_ids
+ID_TTL_S = 2 * 3600  # request ids can be stitched to for 2 hours
 SEED = 1729  # one fixed seed for every piece: steadier delivery across joins
 OUTPUT_FORMAT = "mp3_44100_128"
 RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
@@ -129,10 +130,19 @@ def _album_dir(settings: Settings, plan: dict) -> Path:
     return album
 
 
-def _key(settings: Settings, text: str) -> str:
-    """Cache key for one piece: anything that changes the audio changes the key."""
-    ident = [settings.model_id, settings.voice_id, SEED, OUTPUT_FORMAT, text]
-    return hashlib.sha256(json.dumps(ident).encode()).hexdigest()[:20]
+def _keyed(settings: Settings, pieces: list[str]) -> list[tuple[str, str]]:
+    """(text, cache key) per piece: anything that changes a piece's audio changes its key.
+
+    A stitched piece is spoken in continuity with the pieces before it, so their keys are
+    part of its own: editing piece 1 re-renders the stitched pieces that follow it."""
+    out: list[tuple[str, str]] = []
+    stitch = settings.model_id not in NO_STITCHING
+    for text in pieces:
+        ident = [settings.model_id, settings.voice_id, SEED, OUTPUT_FORMAT, text]
+        if stitch:  # (unstitched keys stay as they were, so existing caches still hit)
+            ident.append([k for _, k in out[-MAX_PREVIOUS:]])
+        out.append((text, hashlib.sha256(json.dumps(ident).encode()).hexdigest()[:20]))
+    return out
 
 
 # --- ElevenLabs ------------------------------------------------------------------------------
@@ -202,13 +212,34 @@ def _script(series_dir: Path, ep: dict) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def cost(plan: dict, ep: dict, series_dir: Path, settings: Settings) -> int:
-    """Characters this episode would send to ElevenLabs now: only pieces not yet cached."""
-    audio = episode_dir(series_dir, ep["n"]) / "audio"
-    pieces = split_text(_script(series_dir, ep), char_limit(settings.model_id))
-    return sum(
-        len(t) for t in pieces if not (audio / f"{_key(settings, t)}.mp3").exists()
+def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
+    """(script, output MP3, render state, previous state, up to date) for one episode."""
+    script = _script(series_dir, ep)
+    out = (
+        _album_dir(settings, plan) / f"{ep['n']:02d} - {safe_filename(ep['title'])}.mp3"
     )
+    state = {
+        "script_sha256": hashlib.sha256(script.encode()).hexdigest(),
+        "model": settings.model_id,
+        "voice": settings.voice_id,
+        "output": str(out),
+    }
+    marker = episode_dir(series_dir, ep["n"]) / "render.json"
+    previous = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
+    return script, out, state, previous, out.exists() and previous == state
+
+
+def cost(
+    plan: dict, ep: dict, series_dir: Path, settings: Settings, *, force: bool = False
+) -> int:
+    """Characters this episode would send to ElevenLabs now: 0 if it is already rendered
+    (and not forced), else only the pieces not yet cached."""
+    script, _, _, _, up_to_date = _target(plan, ep, series_dir, settings)
+    if up_to_date and not force:
+        return 0
+    audio = episode_dir(series_dir, ep["n"]) / "audio"
+    pieces = _keyed(settings, split_text(script, char_limit(settings.model_id)))
+    return sum(len(t) for t, k in pieces if not (audio / f"{k}.mp3").exists())
 
 
 def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
@@ -242,38 +273,31 @@ def render_episode(
     *,
     force: bool = False,
 ) -> Rendered:
-    script = _script(series_dir, ep)
-    d = episode_dir(series_dir, ep["n"])
-    out = (
-        _album_dir(settings, plan) / f"{ep['n']:02d} - {safe_filename(ep['title'])}.mp3"
-    )
-    state = {
-        "script_sha256": hashlib.sha256(script.encode()).hexdigest(),
-        "model": settings.model_id,
-        "voice": settings.voice_id,
-        "output": str(out),
-    }
-    marker = d / "render.json"
-    previous = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
-    if not force and out.exists() and marker.exists() and previous == state:
+    script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings)
+    if up_to_date and not force:
         return Rendered(out, 0, 0, True)
+    d = episode_dir(series_dir, ep["n"])
+    marker = d / "render.json"
     audio_dir = d / "audio"
     audio_dir.mkdir(exist_ok=True)
     stitch = settings.model_id not in NO_STITCHING
     files, ids, billed, reused = [], [], 0, 0
-    for text in split_text(script, char_limit(settings.model_id)):
-        key = _key(settings, text)
+    for text, key in _keyed(
+        settings, split_text(script, char_limit(settings.model_id))
+    ):
         mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
         if mp3.exists():
             reused += 1
         else:
-            audio, request_id = tts(text, ids[-MAX_PREVIOUS:] if stitch else [])
+            context = [i for i in ids[-MAX_PREVIOUS:] if i] if stitch else []
+            audio, request_id = tts(text, context)
             part = mp3.with_suffix(".part")
             part.write_bytes(audio)
             rid.write_text(request_id, encoding="utf-8")
             os.replace(part, mp3)  # a piece is cached only once it is fully on disk
             billed += len(text)
-        ids.append(rid.read_text(encoding="utf-8").strip() if rid.exists() else "")
+        fresh = rid.exists() and time.time() - rid.stat().st_mtime < ID_TTL_S
+        ids.append(rid.read_text(encoding="utf-8").strip() if fresh else "")  # "": skip
         files.append(mp3)
     artist = plan["author"] or "lecture-forge"
     _join(files, out, {

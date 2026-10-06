@@ -270,6 +270,59 @@ def test_cost_counts_only_pieces_not_yet_paid_for(series, tmp_path, beep):
     assert r.cost(plan, ep, series, s) == full - len(split_text(script, 5000)[0])
 
 
+def test_cost_is_zero_for_a_rendered_episode_even_without_its_piece_cache(
+    series, tmp_path, beep
+):
+    plan = load_plan(series / "plan.yaml")
+    s, ep = settings(tmp_path), plan["episodes"][0]
+    run(series, tmp_path, FakeTTS(beep))
+    for f in (episode_dir(series, 1) / "audio").iterdir():
+        f.unlink()  # the cache is gone, but the MP3 is current: nothing to pay for
+    assert r.cost(plan, ep, series, s) == 0
+    assert r.cost(plan, ep, series, s, force=True) > 0  # --force really would re-render
+
+
+def _three_pieces(series):
+    script = episode_dir(series, 1) / "script.txt"
+    paras = [f"Paragraph {i}. {PARA}" for i in range(27)]  # 3 pieces at 10k, 6 at 5k
+    script.write_text("\n\n".join(paras), encoding="utf-8")
+    return script, paras
+
+
+def test_editing_a_piece_rerenders_the_stitched_pieces_after_it(series, tmp_path, beep):
+    script, paras = _three_pieces(series)
+    run(series, tmp_path, FakeTTS(beep), model="eleven_multilingual_v2")
+    script.write_text(
+        "\n\n".join(["Edited. " + paras[0], *paras[1:]]), encoding="utf-8"
+    )
+    tts = FakeTTS(beep)
+    result = run(series, tmp_path, tts, model="eleven_multilingual_v2")
+    assert len(tts.calls) == 3 and result.reused == 0  # 2 and 3 continue from new 1
+
+
+def test_unstitched_pieces_after_an_edit_are_still_reused(series, tmp_path, beep):
+    script, paras = _three_pieces(series)
+    run(series, tmp_path, FakeTTS(beep))
+    script.write_text(
+        "\n\n".join(["Edited. " + paras[0], *paras[1:]]), encoding="utf-8"
+    )
+    tts = FakeTTS(beep)
+    assert run(series, tmp_path, tts).reused > 0 and len(tts.calls) == 1
+
+
+def test_expired_or_missing_request_ids_are_never_stitched(series, tmp_path, beep):
+    import os
+
+    _three_pieces(series)
+    with pytest.raises(RenderError):  # piece 1 is paid for, then an outage
+        run(series, tmp_path, FakeTTS(beep, fail_at=1), model="eleven_multilingual_v2")
+    (rid,) = (episode_dir(series, 1) / "audio").glob("*.rid")
+    os.utime(rid, (0, 0))  # resumed long after: its id has expired
+    tts = FakeTTS(beep)
+    run(series, tmp_path, tts, model="eleven_multilingual_v2")
+    assert tts.calls[0][1] == [] and tts.calls[1][1] == ["req-1"]
+
+
 # --- ElevenLabs adapter: retries -----------------------------------------------------------
 
 

@@ -203,7 +203,7 @@ def cmd_render(args: argparse.Namespace) -> None:
                 )
             print(f"Episode {ep['n']}: {ep['title']}: not written yet, skipping")
             continue
-        chars = render.cost(plan, ep, series_dir, settings)
+        chars = render.cost(plan, ep, series_dir, settings, force=args.force)
         print(f"Episode {ep['n']}: {ep['title']}: {chars:,} characters to synthesize")
         ready.append(ep)
         total += chars
