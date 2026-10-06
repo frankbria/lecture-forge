@@ -6,10 +6,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from lecture_forge.config import ConfigError, Settings, load_settings
-from lecture_forge.plan import PlanError, make_plan, write_plan
+from lecture_forge.plan import MAX_MINUTES, PlanError, load_plan, make_plan, write_plan
 from lecture_forge.providers import ProviderError, complete
 from lecture_forge.source import Source, open_source, outline
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
+from lecture_forge.write import WriteError, episode_dir, write_episode
 
 SERIES_DIR = Path("series")
 SLUG = re.compile(
@@ -72,12 +73,30 @@ def _range(text: str | None, src: Source) -> tuple[int, int]:
     return start, end
 
 
-def cmd_plan(args: argparse.Namespace) -> None:
-    if not SLUG.fullmatch(args.series):
+def _check_series(slug: str) -> Path:
+    if not SLUG.fullmatch(slug):
         raise ValueError(
-            f"--series must be lowercase letters, digits, - or _, got {args.series!r}"
+            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
         )
-    out = SERIES_DIR / args.series / "plan.yaml"
+    return SERIES_DIR / slug
+
+
+def _provider_call(settings: Settings, auto: bool):
+    """A (system, user, pdf) -> text call that keeps a provider switch for later calls."""
+    interactive = not auto and sys.stdin.isatty()
+    current = {"settings": settings}
+
+    def call(system: str, user: str, pdf: Path | None) -> str:
+        text, current["settings"] = llm(
+            current["settings"], system, user, pdf, interactive=interactive
+        )
+        return text
+
+    return call
+
+
+def cmd_plan(args: argparse.Namespace) -> None:
+    out = _check_series(args.series) / "plan.yaml"
     if out.exists() and not args.force:  # check before spending an LLM call
         raise FileExistsError(
             f"{out} exists and may hold your edits; pass --force to replace it"
@@ -86,14 +105,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
     start, end = _range(args.range, src)
-    interactive = not args.auto and sys.stdin.isatty()
-    current = {"settings": settings}
-
-    def call(system: str, user: str, pdf: Path | None) -> str:
-        text, current["settings"] = llm(
-            current["settings"], system, user, pdf, interactive=interactive
-        )
-        return text
+    call = _provider_call(settings, args.auto)
 
     unit = "pages" if src.kind == "pdf" else "lines"
     print(f"Planning {src.path.name} {unit} {start}-{end} with {settings.provider}...")
@@ -107,6 +119,61 @@ def cmd_plan(args: argparse.Namespace) -> None:
     total = sum(e["est_minutes"] for e in episodes)
     print(f"{len(episodes)} episodes, ~{total} min total -> {out}")
     print("Review and edit the plan before writing scripts.")
+
+
+def cmd_write(args: argparse.Namespace) -> None:
+    series_dir = _check_series(args.series)
+    plan_path = series_dir / "plan.yaml"
+    if not plan_path.is_file():
+        raise FileNotFoundError(
+            f"{plan_path} not found; run `lecture-forge plan` first"
+        )
+    plan = load_plan(plan_path)
+
+    def done(ep: dict) -> bool:
+        return (episode_dir(series_dir, ep["n"]) / "script.txt").exists()
+
+    if args.episode is not None:
+        todo = [e for e in plan["episodes"] if e["n"] == args.episode]
+        if not todo:
+            raise ValueError(f"the plan has no episode {args.episode}")
+        if done(todo[0]) and not args.force:
+            raise FileExistsError(
+                f"episode {args.episode} is already written; pass --force to rewrite it"
+            )
+    else:
+        todo = plan["episodes"]
+    settings = load_settings()
+    guide = load_style_guide(settings.style_guide_path)
+    call = _provider_call(settings, args.auto)
+    unit = plan["unit"]
+    for ep in todo:
+        rewriting = done(ep)
+        if rewriting and not args.force:
+            print(f"Episode {ep['n']}: {ep['title']}: already written, skipping")
+            continue
+        where = f"{unit} {ep['start']}-{ep['end']}"
+        print(
+            f"Episode {ep['n']}: {ep['title']} ({where}): drafting, then critiquing...",
+            flush=True,
+        )
+        w = write_episode(plan, ep, guide, call, series_dir)
+        print(f"  -> {w.dir / 'script.txt'}  {w.words} words, ~{w.minutes:.0f} min")
+        if w.minutes > MAX_MINUTES:
+            print(
+                f"  note: over {MAX_MINUTES} minutes; consider splitting it in plan.yaml"
+            )
+        if w.split:
+            print(
+                f"  note: the writer suggests a split: {w.split} (plan.yaml is unchanged)"
+            )
+        later = [str(e["n"]) for e in plan["episodes"] if e["n"] > ep["n"] and done(e)]
+        if rewriting and args.episode is not None and later:
+            print(
+                f"  note: episode {', '.join(later)} was written from the old summary and "
+                "puzzle; rewrite it with --force if the recap matters"
+            )
+    print("Review the script.txt files before rendering audio.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -126,12 +193,28 @@ def main(argv: list[str] | None = None) -> int:
         "--auto", action="store_true", help="never prompt (no provider switching)"
     )
     p.set_defaults(func=cmd_plan)
+    p = sub.add_parser(
+        "write", help="write episode scripts (script pass, then critique)"
+    )
+    p.add_argument("series")
+    which = p.add_mutually_exclusive_group(required=True)
+    which.add_argument("--episode", type=int, help="write one episode")
+    which.add_argument(
+        "--all", action="store_true", help="write every unwritten episode, in order"
+    )
+    p.add_argument(
+        "--force", action="store_true", help="rewrite episodes that already exist"
+    )
+    p.add_argument(
+        "--auto", action="store_true", help="never prompt (no provider switching)"
+    )
+    p.set_defaults(func=cmd_write)
     args = parser.parse_args(argv)
     try:
         args.func(args)
     except (
         FileNotFoundError, FileExistsError, ValueError,
-        ConfigError, StyleGuideError, ProviderError, PlanError,
+        ConfigError, StyleGuideError, ProviderError, PlanError, WriteError,
     ) as e:  # fmt: skip
         print(f"error: {e}", file=sys.stderr)
         return 1
