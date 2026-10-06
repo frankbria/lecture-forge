@@ -4,7 +4,7 @@ Turn textbook chapters into Feynman-style, chalkboard-free audio lectures you ca
 
 PDF / Markdown / text → episode plan → script (written, then critiqued) → ElevenLabs MP3 in your Dropbox.
 
-**Status:** Milestones 1–4 done: config, source loading, PDF slicing, style-guide loader, the `outline`, `plan` and `write` commands, and swappable LLM providers (Claude Code on your subscription, Claude API, OpenAI) with retry and provider switching. `render` and `run` are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+**Status:** Milestones 1–5 done: config, source loading, PDF slicing, style-guide loader, the `outline`, `plan`, `write` and `render` commands, and swappable LLM providers (Claude Code on your subscription, Claude API, OpenAI) with retry and provider switching. `run` (all steps in one go) is still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Usage
 
@@ -17,18 +17,29 @@ lecture-forge plan book.pdf --series topology   # proposes series/topology/plan.
 lecture-forge plan book.pdf --series ch3 --range 120-185   # plan one chapter of a full book
 lecture-forge write topology --all              # script pass + critique per episode, in order
 lecture-forge write topology --episode 3 --force   # rewrite one episode
+lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\<series title> (asks first)
 ```
 
 The planner reads the content itself and breaks at clean concept boundaries, one central idea and at most 30 minutes per episode. Each episode records why it ends where it does.
 
 `write` drafts each episode under your style guide, critiques and revises it against the source, and saves `series/<slug>/episodes/NN/script.txt` (spoken text only) plus the production notes, puzzle answer and summary that the next episode builds on. Read the scripts before rendering.
 
+`render` shows the characters it will spend and what's left on your ElevenLabs plan, and asks before spending (`--yes` to skip). It splits each script into pieces, caches every piece so nothing is paid for twice, joins them with ffmpeg and writes tagged MP3s (album = series, track = episode) into your Dropbox. Requires `ffmpeg`.
+
 Planned (not implemented yet):
 
 ```bash
-lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\topology
 lecture-forge run chapter3.pdf --series topo3 --auto   # everything, no stops
 ```
+
+## Tests and spending
+
+```bash
+uv run pytest                      # unit + free integration tests: never spends ElevenLabs or API credits
+LECTURE_FORGE_PAID_TESTS=1 uv run pytest -m paid   # ~70 ElevenLabs characters + a few cents of API usage
+```
+
+Run the paid tests only when the ElevenLabs or API client code changes. A guard in `tests/conftest.py` blocks any other test from using your real keys. CI has no keys at all. See "Testing and spending policy" in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Setup
 

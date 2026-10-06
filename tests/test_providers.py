@@ -151,12 +151,14 @@ def test_claude_code_reads_pdf_on_subscription(theorem_pdf, monkeypatch):
 
 
 @pytest.mark.integration
+@pytest.mark.paid  # a few cents of API usage
 @pytest.mark.skipif(not REAL.anthropic_api_key, reason="ANTHROPIC_API_KEY not set")
 def test_anthropic_reads_pdf(theorem_pdf):
     ask_theorem("anthropic", theorem_pdf)
 
 
 @pytest.mark.integration
+@pytest.mark.paid  # a few cents of API usage
 @pytest.mark.skipif(not REAL.openai_api_key, reason="OPENAI_API_KEY not set")
 def test_openai_reads_pdf(theorem_pdf):
     ask_theorem("openai", theorem_pdf)
