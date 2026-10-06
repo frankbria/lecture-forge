@@ -107,6 +107,8 @@ def test_valid_plan_has_no_errors():
         ([episode(1, 6, minutes=float("inf"))], "est_minutes"),
         ([episode(1, 6, title="")], "title"),
         ([episode(1, 6, central_idea=None)], "central_idea"),
+        ([episode(1, 6, break_reason="")], "break_reason"),
+        ([episode(1, 6, break_reason=None)], "break_reason"),
         ([episode(1.5, 6)], "start"),
     ],
 )

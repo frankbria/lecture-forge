@@ -103,7 +103,7 @@ def validate(plan: dict, lo: int, hi: int) -> list[str]:
         if not isinstance(e, dict):
             errors.append(f"{where} is not an object")
             continue
-        for key in ("title", "central_idea"):
+        for key in ("title", "central_idea", "break_reason"):
             if not isinstance(e.get(key), str) or not e[key].strip():
                 errors.append(f"{where}: {key} is missing")
         m = e.get("est_minutes")
