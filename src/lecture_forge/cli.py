@@ -235,6 +235,36 @@ def cmd_render(args: argparse.Namespace) -> None:
             )
 
 
+def cmd_run(args: argparse.Namespace) -> None:
+    """plan, write --all, render --all. Every step skips finished work, so a failed or
+    interrupted run picks up where it stopped when run again."""
+    plan_path = _check_series(args.series) / "plan.yaml"
+    settings = load_settings()
+    settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
+    settings.require("voice_id")
+    if plan_path.exists():
+        planned = load_plan(plan_path)["source"].path.resolve()
+        if planned != Path(args.source).resolve():
+            raise ValueError(
+                f"{plan_path} is a plan for {planned}; use another --series for {args.source}"
+            )
+        print(f"Using the existing {plan_path} (delete it to plan again)")
+    else:
+        cmd_plan(argparse.Namespace(
+            source=args.source, series=args.series, range=args.range, force=False,
+            auto=args.auto,
+        ))  # fmt: skip
+        if not args.auto:  # the approval gate: review the plan, then run again
+            print("Run the same command again to write and render, or pass --auto.")
+            return
+    cmd_write(argparse.Namespace(
+        series=args.series, episode=None, all=True, force=False, auto=args.auto
+    ))  # fmt: skip
+    cmd_render(argparse.Namespace(
+        series=args.series, episode=None, all=True, force=False, yes=args.yes
+    ))  # fmt: skip
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lecture-forge")
     sub = parser.add_subparsers(required=True)
@@ -282,6 +312,23 @@ def main(argv: list[str] | None = None) -> int:
         "--yes", action="store_true", help="don't ask before spending credits"
     )
     p.set_defaults(func=cmd_render)
+    p = sub.add_parser(
+        "run", help="plan, write and render in one go; resumes where it stopped"
+    )
+    p.add_argument("source")
+    p.add_argument(
+        "--series", required=True, help="name for this series, e.g. topology"
+    )
+    p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    p.add_argument(
+        "--auto",
+        action="store_true",
+        help="no review stops and no prompts (spending still needs --yes)",
+    )
+    p.add_argument(
+        "--yes", action="store_true", help="don't ask before spending credits"
+    )
+    p.set_defaults(func=cmd_run)
     args = parser.parse_args(argv)
     try:
         args.func(args)
