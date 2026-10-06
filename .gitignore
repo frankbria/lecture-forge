@@ -1,3 +1,5 @@
 .env
 series/
 *.mp3
+prompts/style-guide.md
+*.swp

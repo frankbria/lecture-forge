@@ -1,6 +1,6 @@
 # lecture-forge — Requirements (v0.1, CLI)
 
-Turn a textbook (or one chapter of it) into a series of single-voice audio lectures you can listen to in the car, written to the rules in [`prompts/style-guide.md`](../prompts/style-guide.md).
+Turn a textbook (or one chapter of it) into a series of single-voice audio lectures you can listen to in the car, written to the rules in your audio-lecture style guide (kept outside the repo; see Configuration).
 
 ## Goals
 
@@ -35,7 +35,9 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 
 ### 3. `render` — text to speech
 - `lecture-forge render <slug> [--episode N | --all]`
-- Uses ElevenLabs. The script is split at paragraph boundaries into pieces under the model's per-request character limit. Each request passes `previous_text`/`next_text` so the voice stays consistent across joins. The pieces are joined with ffmpeg.
+- Uses ElevenLabs with model **`eleven_v3`** (the default; overridable with `ELEVENLABS_MODEL_ID`).
+- `eleven_v3` accepts at most **5,000 characters per request**, so the script is split at paragraph boundaries into pieces of 5,000 characters or fewer. A 25-minute episode is about 25,000 characters, which is 5–6 requests. The limit is looked up per model, so switching models adjusts the piece size.
+- `eleven_v3` does **not** support request stitching. Instead, every piece uses the same voice settings and the same fixed `seed`, and the joins fall on paragraph breaks where a pause is natural anyway. The pieces are joined with ffmpeg. If the joins are audible, switch to a model that supports stitching (`eleven_v4`, `eleven_multilingual_v2`) and send `previous_request_ids` with each request.
 - ID3 tags: album = series title, track = episode number, title = episode title, artist = "lecture-forge".
 - Output: `<output_dir>/<series>/NN - <title>.mp3`. The default `output_dir` is `/mnt/d/Dropbox/Lectures` (`D:\Dropbox\Lectures`).
 - Running it again is safe: an episode whose `script.txt` hash hasn't changed is skipped, so credits aren't spent twice.
@@ -60,9 +62,9 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 
 ## Configuration
 
-- `.env`: `ELEVENLABS_API_KEY`, plus `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as needed.
-- `config.toml`: provider, models, ElevenLabs `voice_id`, `model_id`, voice settings, `output_dir`, path to the style guide.
-- The style guide is a prompt file on disk (`prompts/style-guide.md`) and is split by its `## Part N` headings. You can edit it without touching code.
+- `.env` (git-ignored): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, optional `ELEVENLABS_MODEL_ID` (default `eleven_v3`), optional `STYLE_GUIDE_PATH`, plus `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as needed.
+- `config.toml`: provider, LLM models, voice settings and seed, `output_dir`.
+- **Style guide:** this is your own prompt file, and it is **not** stored in the repo. It is loaded from `STYLE_GUIDE_PATH`, or from `prompts/style-guide.md` (git-ignored) if that isn't set, and split by its `## Part N` headings. If it's missing, the command exits with a message saying where to put it.
 
 ## State
 
@@ -74,11 +76,9 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 - Python 3.12, `uv`, Typer (CLI), PyYAML, pymupdf (slicing and text extraction), anthropic, openai, elevenlabs, mutagen (ID3 tags), ffmpeg (join).
 - Tests: pytest. Integration tests call the real providers and are marked so they can be skipped when no key is set.
 
-## Open questions
+## Decisions
 
-1. **Episode summary:** the style guide's output format has no summary section, but the next episode needs one. Plan: append a 4th section, `EPISODE SUMMARY`, to the Part 1 output format in our copy of the prompt.
-2. **Pronunciation:** the production notes list pronunciation hints. Should v0.2 turn them into an ElevenLabs pronunciation dictionary automatically?
-3. **ElevenLabs voice and model:** which voice? `eleven_multilingual_v2` (stable, takes previous/next text) or `eleven_v3` (more expressive)?
+1. **Episode summary:** the style guide's output format has no summary section, but the next episode needs one. The app adds an instruction for a 4th section, `EPISODE SUMMARY` (one paragraph, not spoken), to the Part 1 prompt at runtime. Your style guide file is never modified.
 
 ## Milestones
 
@@ -89,3 +89,4 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 5. **M5:** `render` (ElevenLabs, chunking, ffmpeg, ID3, idempotency).
 6. **M6:** `run --auto`; end-to-end test on a real chapter.
 7. **Later:** GUI over the same core.
+8. **Later:** custom pronunciation. Turn the pronunciation hints in each episode's production notes into an ElevenLabs pronunciation dictionary, applied at render time. *Deferred: tracked in a GitHub issue.*
