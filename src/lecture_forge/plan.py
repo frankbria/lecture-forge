@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from lecture_forge.source import Source, extract_text, outline, slice_pdf
+from lecture_forge.source import Source, extract_text, open_source, outline, slice_pdf
 from lecture_forge.style_guide import StyleGuide
 
 MAX_MINUTES = 30  # style guide: 20-30 minutes per episode; anything longer gets split
@@ -199,3 +199,75 @@ def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> P
     body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)
     path.write_text(HEADER + body, encoding="utf-8")
     return path
+
+
+def load_plan(path: Path) -> dict:
+    """Read a (possibly hand-edited) plan.yaml, checking everything `write` relies on.
+
+    Returns {title, author, source: Source, unit, episodes: [{n, title, central_idea,
+    start, end, listener_notes}]} with episodes ordered by n.
+    """
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        raise PlanError(f"{path} is not valid YAML: {e}") from e
+    if not isinstance(data, dict) or not isinstance(data.get("episodes"), list):
+        raise PlanError(f"{path} has no episodes list")
+    source = data.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise PlanError(
+            f"{path}: source is missing; it must be the path of the book or notes"
+        )
+    try:
+        src = open_source(source)
+    except (FileNotFoundError, ValueError) as e:
+        raise PlanError(
+            f"{path}: source {data.get('source')!r} can't be opened ({e})"
+        ) from e
+    unit = "pages" if src.kind == "pdf" else "lines"
+    errors, episodes, seen = [], [], set()
+    for i, e in enumerate(data["episodes"], 1):
+        where = f"episode entry {i}"
+        if not isinstance(e, dict):
+            errors.append(f"{where} is not a mapping")
+            continue
+        n = e.get("n")
+        if type(n) is not int or n < 1:
+            errors.append(f"{where}: n must be a positive whole number")
+            continue
+        where = f"episode {n}"
+        if n in seen:
+            errors.append(f"duplicate episode number {n}")
+        seen.add(n)
+        if not isinstance(e.get("title"), str) or not e["title"].strip():
+            errors.append(f"{where}: title is missing")
+        rng = e.get(unit)
+        if not (
+            isinstance(rng, list) and len(rng) == 2 and all(type(x) is int for x in rng)
+        ):
+            errors.append(f"{where}: {unit} must be [start, end]")
+            continue
+        start, end = rng
+        if not 1 <= start <= end <= src.length:
+            errors.append(
+                f"{where}: {unit} {start}-{end} is outside 1-{src.length} or reversed"
+            )
+        episodes.append(
+            {
+                "n": n,
+                "title": e.get("title", ""),
+                "central_idea": _text(e.get("central_idea")),
+                "start": start,
+                "end": end,
+                "listener_notes": _text(e.get("listener_notes")),
+            }
+        )
+    if errors:
+        raise PlanError(f"{path}: " + "; ".join(errors))
+    return {
+        "title": _text(data.get("title")) or src.path.stem,
+        "author": _text(data.get("author")),
+        "source": src,
+        "unit": unit,
+        "episodes": sorted(episodes, key=lambda e: e["n"]),
+    }

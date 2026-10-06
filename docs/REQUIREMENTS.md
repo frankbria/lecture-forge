@@ -33,12 +33,16 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 - **Approval gate:** the command stops here. You edit the YAML (reorder, merge, split, change ranges) before running `write`.
 
 ### 2. `write` — script pass, then critique pass
-- `lecture-forge write <slug> [--episode N | --all]`
-- **Pass 1:** the style guide Part 1 is the system prompt and the Part 3 template is the input. The template is filled from plan.yaml plus the *previous episode's* summary and puzzle answer.
-- **Pass 2:** the style guide Part 2 critiques the draft against the source and returns a revised script.
-- Results are saved to `series/<slug>/episodes/NN/`: `draft.md`, `critique.md`, `script.txt` (spoken text only), `notes.md` (production notes), `puzzle_answer.md`, `summary.md`.
-- If the model proposes a split point (production notes say the source needs a split), it is reported to you. The plan is never re-split silently.
-- Episodes have to be written in order, because episode N needs N−1's summary and puzzle. `--all` writes them one after another.
+- `lecture-forge write <slug> (--episode N | --all) [--force] [--auto]`
+- Reads `series/<slug>/plan.yaml` **with your edits** and validates it again: unique positive episode numbers, titles present, ranges inside the source, and the source still openable. Episodes run in order of `n`.
+- **Pass 1 (script):** the style guide's Part 1 is the system prompt. The Part 3 template is filled **by its field labels** (SOURCE, SERIES/BOOK, EPISODE NUMBER, …SUMMARY, …PUZZLE…, LISTENER…), so edits to your guide keep working; unknown fields get "(not provided)". The plan's central idea and listener notes go into LISTENER NOTES, and the episode's pages (sliced PDF) or lines are the source. A runtime addendum (your file is never edited) asks for a fourth section, `EPISODE SUMMARY`, and for the puzzle to be restated in one line before its answer.
+- **Pass 2 (critique):** the system prompt is Part 1 **plus** Part 2, since Part 2 reviews "under the style guide above". It gets the source pages again, so it can check facts. If the revision changes the closing puzzle, it adds a `PUZZLE ANSWER` section, so continuity always matches the final script.
+- **Output is untrusted:** headings are recognized in any common style (`**SCRIPT**`, `## SCRIPT`, `6. **Revised script:**` …). A draft missing `SCRIPT`, `PUZZLE ANSWER` or `EPISODE SUMMARY`, or a revised script shorter than half the draft (truncated or summarized), gets **one** repair round, then the command fails.
+- **Files** in `series/<slug>/episodes/NN/`: `draft.md` and `notes.md` (saved after pass 1, kept even if pass 2 fails), `critique.md`, `puzzle_answer.md`, `summary.md`, then `script.txt` **last**. It holds the spoken text only, and its existence marks the episode done. Every file is written atomically (a temp file, then a rename), and a rewrite removes the old `script.txt` first, so an interrupted run is either fully done or not done. It is never "done" with continuity files that don't match its script.
+- **Continuity:** episode N's prompt carries the previous episode's `summary.md` and `puzzle_answer.md`. N refuses to start until the previous episode is written. The first episode gets "(none: first episode)".
+- `--all` writes every unwritten episode in order and skips written ones. `--episode N` refuses to overwrite without `--force`. Rewriting an episode warns that later written episodes were built on its old summary and puzzle.
+- Reported, never acted on silently: script length (words and ~minutes at 150 wpm, with a note over 30 minutes) and any split point the writer suggests in its production notes. The plan is never re-split automatically.
+- Provider failures follow the retry and switch policy; a switch carries across the episodes of one run.
 
 ### 3. `render` — text to speech
 - `lecture-forge render <slug> [--episode N | --all]`
