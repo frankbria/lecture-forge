@@ -11,7 +11,7 @@ PDF / Markdown / text → episode plan → script (written, then critiqued) → 
 Available now:
 
 ```bash
-uv sync
+uv tool install --editable .              # once: puts `lecture-forge` on your PATH
 lecture-forge outline book.pdf                  # length + bookmarks/headings of a PDF/md/txt source
 lecture-forge plan book.pdf --series topology   # proposes series/topology/plan.yaml; review and edit it
 lecture-forge plan book.pdf --series ch3 --range 120-185   # plan one chapter of a full book
@@ -40,6 +40,8 @@ LECTURE_FORGE_PAID_TESTS=1 uv run pytest -m paid   # ~70 ElevenLabs characters +
 Run the paid tests only when the ElevenLabs or API client code changes. A guard in `tests/conftest.py` blocks any other test from using your real keys. CI has no keys at all. See "Testing and spending policy" in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Setup
+
+Run commands from the repo folder: `.env`, `series/` and the default style guide path are read relative to the current directory. (Or skip the install and use `uv run lecture-forge ...`.)
 
 1. `cp .env.example .env` and fill in `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`, plus an LLM key if you aren't using Claude Code.
 2. Provide your style guide. Either copy it to `prompts/style-guide.md` (git-ignored) or set `STYLE_GUIDE_PATH` in `.env`. It must follow the Part 1 (script) / Part 2 (critique) / Part 3 (input template) structure.
