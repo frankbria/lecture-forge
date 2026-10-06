@@ -11,6 +11,9 @@ KEYS = [
     "STYLE_GUIDE_PATH",
     "LECTURE_FORGE_OUTPUT_DIR",
     "LECTURE_FORGE_PROVIDER",
+    "LECTURE_FORGE_LLM_MODEL",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
 ]
 
 
@@ -48,7 +51,10 @@ def test_unknown_provider_is_rejected(tmp_path):
         load_settings(env)
 
 
-def test_api_key_never_appears_in_repr(tmp_path):
+def test_api_keys_never_appear_in_repr(tmp_path):
     env = tmp_path / ".env"
-    env.write_text("ELEVENLABS_API_KEY=sk_secret\n")
-    assert "sk_secret" not in repr(load_settings(env))
+    env.write_text(
+        "ELEVENLABS_API_KEY=sk_el\nANTHROPIC_API_KEY=sk_ant\nOPENAI_API_KEY=sk_oai\n"
+    )
+    r = repr(load_settings(env))
+    assert not any(k in r for k in ("sk_el", "sk_ant", "sk_oai"))
