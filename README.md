@@ -4,7 +4,7 @@ Turn textbook chapters into Feynman-style, chalkboard-free audio lectures you ca
 
 PDF / Markdown / text → episode plan → script (written, then critiqued) → ElevenLabs MP3 in your Dropbox.
 
-**Status:** Milestone 1 done (config, source loading, PDF slicing, style-guide loader, `outline` command). `plan`, `write`, `render` and `run` are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+**Status:** Milestones 1–2 done: config, source loading, PDF slicing, style-guide loader, the `outline` command, and swappable LLM providers (Claude Code on your subscription, Claude API, OpenAI) with retry and provider switching. `plan`, `write`, `render` and `run` are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Usage
 

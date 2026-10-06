@@ -274,7 +274,7 @@ def test_claude_code_without_pdf_or_model(fake_claude):
 
 @pytest.mark.parametrize(
     "status,retryable",
-    [(429, True), (529, True), (None, True), (400, False), (401, False)],
+    [(408, True), (429, True), (529, True), (None, True), (400, False), (401, False)],
 )
 def test_claude_code_error_status_decides_retry(fake_claude, status, retryable):
     reply, _ = fake_claude
@@ -311,7 +311,16 @@ def test_claude_code_timeout_is_retryable(fake_claude, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "status,retryable", [(429, True), (503, True), (None, True), (400, False)]
+    "status,retryable",
+    [
+        (408, True),
+        (409, True),
+        (429, True),
+        (503, True),
+        (None, True),
+        (400, False),
+        (404, False),
+    ],
 )
 def test_sdk_error_classification(status, retryable):
     class SDKError(Exception):

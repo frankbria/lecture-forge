@@ -37,11 +37,15 @@ class ProviderError(Exception):
         self.alternatives: list[str] = []  # filled in by complete() on final failure
 
 
+def _retryable(status: int | None) -> bool:
+    """Timeouts (408), conflicts (409), rate limits (429), server errors and network failures
+    (no status) are worth retrying; other 4xx are not. Mirrors the SDKs' own retry rule,
+    which is switched off so there's one retry policy."""
+    return status is None or status in (408, 409, 429) or status >= 500
+
+
 def _api_error(provider: str, e: Exception) -> ProviderError:
-    """Rate limits, server errors and network failures are worth retrying; other 4xx are not."""
-    status = getattr(e, "status_code", None)
-    retryable = status is None or status == 429 or status >= 500
-    return ProviderError(provider, str(e), retryable)
+    return ProviderError(provider, str(e), _retryable(getattr(e, "status_code", None)))
 
 
 def _b64(pdf: Path) -> str:
@@ -97,8 +101,9 @@ def _claude_code(system: str, user: str, pdf: Path | None, settings: Settings) -
         raise ProviderError(name, f"exit {proc.returncode}: {detail}", True) from None
     if out.get("is_error"):
         status = out.get("api_error_status")
-        retryable = status is None or status == 429 or status >= 500
-        raise ProviderError(name, out.get("result") or out.get("subtype"), retryable)
+        raise ProviderError(
+            name, out.get("result") or out.get("subtype"), _retryable(status)
+        )
     return out["result"]
 
 
