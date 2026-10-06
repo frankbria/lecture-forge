@@ -167,8 +167,19 @@ def _openai(system: str, user: str, pdf: Path | None, settings: Settings) -> str
         )
     except openai.APIError as e:
         raise _api_error(name, e) from e
+    return _openai_text(resp)
+
+
+def _openai_text(resp) -> str:
+    """Text of a Responses API reply. `output_text` silently skips refusal blocks."""
     if resp.status == "incomplete":
-        raise ProviderError(name, f"response incomplete: {resp.incomplete_details}")
+        raise ProviderError("openai", f"response incomplete: {resp.incomplete_details}")
+    for item in resp.output:
+        for part in getattr(item, "content", None) or []:
+            if part.type == "refusal":
+                raise ProviderError(
+                    "openai", f"the model declined this request: {part.refusal}"
+                )
     return resp.output_text
 
 
@@ -207,7 +218,10 @@ def complete(
     """
     for attempt in range(attempts):
         try:
-            return PROVIDERS[provider](system, user, pdf, settings)
+            text = PROVIDERS[provider](system, user, pdf, settings)
+            if not text.strip():  # never hand an empty script to the next step
+                raise ProviderError(provider, "returned an empty response")
+            return text
         except ProviderError as e:
             if not e.retryable or attempt == attempts - 1:
                 e.alternatives = [p for p in available(settings) if p != provider]

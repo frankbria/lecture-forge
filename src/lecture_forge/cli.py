@@ -1,4 +1,5 @@
 import argparse
+import dataclasses
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -32,6 +33,11 @@ def llm(
             choice = ask(f"Switch provider? [{'/'.join(e.alternatives)}/n]: ").strip()
             if choice not in e.alternatives:
                 raise
+            if settings.llm_model:  # a model override names the old provider's model
+                print(
+                    f"note: ignoring LECTURE_FORGE_LLM_MODEL={settings.llm_model} for {choice}"
+                )
+                settings = dataclasses.replace(settings, llm_model="")
             provider = choice
 
 

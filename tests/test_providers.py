@@ -321,3 +321,59 @@ def test_sdk_error_classification(status, retryable):
     if status is not None:
         e.status_code = status
     assert providers._api_error("anthropic", e).retryable is retryable
+
+
+# --- review fixes (codex on PR #4) ------------------------------------------------
+
+
+def openai_response(*parts, status="completed"):
+    from openai.types.responses import Response, ResponseOutputMessage
+
+    msg = ResponseOutputMessage.model_construct(
+        type="message", role="assistant", content=list(parts)
+    )
+    return Response.model_construct(
+        status=status, output=[msg], incomplete_details=None
+    )
+
+
+def test_openai_refusal_is_a_permanent_error_not_an_empty_script():
+    from openai.types.responses import ResponseOutputRefusal
+
+    resp = openai_response(
+        ResponseOutputRefusal.model_construct(type="refusal", refusal="no")
+    )
+    with pytest.raises(ProviderError, match="declined") as info:
+        providers._openai_text(resp)
+    assert not info.value.retryable
+
+
+def test_openai_text_is_returned():
+    from openai.types.responses import ResponseOutputText
+
+    part = ResponseOutputText.model_construct(
+        type="output_text", text="script", annotations=[]
+    )
+    assert providers._openai_text(openai_response(part)) == "script"
+
+
+def test_empty_reply_from_any_provider_is_an_error(fake):
+    fake([])
+    providers.PROVIDERS["fake"] = lambda *a: "   "
+    with pytest.raises(ProviderError, match="empty"):
+        complete("fake", "s", "u", settings=settings(), sleep=lambda _: None)
+
+
+def test_switching_provider_drops_the_old_providers_model(fake, monkeypatch):
+    seen = []
+    fake([ProviderError("fake", "400")])
+    monkeypatch.setitem(
+        providers.PROVIDERS,
+        "openai",
+        lambda s, u, p, st: seen.append(st.llm_model) or "ok",
+    )
+    text, used = llm(
+        settings(llm_model="claude-opus-5-5", openai_api_key="k"), "fake", "s", "u",
+        interactive=True, ask=lambda _: "openai",
+    )  # fmt: skip
+    assert (text, used, seen) == ("ok", "openai", [""])
