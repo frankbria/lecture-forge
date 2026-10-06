@@ -4,12 +4,20 @@ Turn textbook chapters into Feynman-style, chalkboard-free audio lectures you ca
 
 PDF / Markdown / text → episode plan → script (written, then critiqued) → ElevenLabs MP3 in your Dropbox.
 
-**Status:** requirements defined, implementation not started. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+**Status:** Milestone 1 done (config, source loading, PDF slicing, style-guide loader, `outline` command). `plan`, `write`, `render` and `run` are still planned. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
-## Planned usage
+## Usage
+
+Available now:
 
 ```bash
 uv sync
+lecture-forge outline book.pdf                  # length + bookmarks/headings of a PDF/md/txt source
+```
+
+Planned (not implemented yet):
+
+```bash
 lecture-forge plan book.pdf --series topology   # proposes series/topology/plan.yaml; edit it
 lecture-forge write topology --all              # script + critique per episode; review script.txt
 lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\topology

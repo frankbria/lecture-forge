@@ -7,11 +7,27 @@ authors = [
     { name = "frankbria", email = "frank.bria@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pymupdf>=1.28.2",
+    "python-dotenv>=1.2.4",
+]
 
 [project.scripts]
-lecture-forge = "lecture_forge:main"
+lecture-forge = "lecture_forge.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+markers = ["integration: calls real external services (LLM / ElevenLabs)"]
+
+[tool.coverage.run]
+source = ["lecture_forge"]

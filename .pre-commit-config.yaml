@@ -1,0 +1,21 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: Python - run last failed tests (fast feedback)
+        entry: uv run pytest --lf -x -m "not integration"
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: coverage-check
+        name: Enforce 85% coverage (manual)
+        entry: scripts/check-python-coverage.sh
+        language: script
+        pass_filenames: false
+        stages: [manual]

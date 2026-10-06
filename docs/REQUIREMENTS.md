@@ -59,12 +59,13 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 
 - Selected with `--provider` or in `config.toml`. Models are configurable for each provider.
 - Markdown and text sources always go in as plain text.
+- **Subscription billing guard:** if Claude Code finds `ANTHROPIC_API_KEY` in its environment, it uses that key **instead of your subscription**. The `claude-code` provider therefore runs `claude -p` with `ANTHROPIC_API_KEY` (and `ANTHROPIC_AUTH_TOKEN`) removed from the environment it passes, and a test enforces this. Settings are read from `.env` with `dotenv_values`, which never exports them into `os.environ`; the app must never call `load_dotenv()`.
 - The PDF is always sliced to the episode's page range first, which keeps you under provider page limits and keeps cost down.
 
 ## Configuration
 
 - `.env` (git-ignored): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, optional `ELEVENLABS_MODEL_ID` (default `eleven_v3`), optional `STYLE_GUIDE_PATH`, plus `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as needed.
-- `config.toml`: provider, LLM models, voice settings and seed, `output_dir`.
+- Also in `.env`: `LECTURE_FORGE_PROVIDER` (default `claude-code`) and `LECTURE_FORGE_OUTPUT_DIR` (default `/mnt/d/Dropbox/Lectures`). There is no separate config file: `.env` holds everything, and real environment variables override it.
 - **Style guide:** this is your own prompt file, and it is **not** tracked in the repo. It is loaded from `STYLE_GUIDE_PATH`, or from `prompts/style-guide.md` (git-ignored) if that isn't set, and split by its `## Part N` headings. If it's missing, the command exits with a message saying where to put it.
 
 ## State
@@ -74,7 +75,7 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 
 ## Stack
 
-- Python 3.12, `uv`, Typer (CLI), PyYAML, pymupdf (slicing and text extraction), anthropic, openai, elevenlabs, mutagen (ID3 tags), ffmpeg (join).
+- Python 3.12, `uv`, argparse (CLI), PyYAML, pymupdf (slicing and text extraction), anthropic, openai, elevenlabs, mutagen (ID3 tags), ffmpeg (join).
 - Tests: pytest. Integration tests call the real providers and are marked so they can be skipped when no key is set.
 
 ## Decisions

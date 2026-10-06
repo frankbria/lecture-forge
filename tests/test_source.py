@@ -1,0 +1,136 @@
+import pymupdf
+import pytest
+
+from lecture_forge.source import extract_text, open_source, outline, slice_pdf
+
+
+@pytest.fixture
+def book(tmp_path):
+    """Five-page PDF with two chapters bookmarked, like a real textbook."""
+    path = tmp_path / "book.pdf"
+    doc = pymupdf.open()
+    for n in range(1, 6):
+        doc.new_page().insert_text((72, 72), f"Page {n} body")
+    doc.set_toc([[1, "Chapter 1", 1], [2, "Section 1.1", 2], [1, "Chapter 2", 4]])
+    doc.save(path)
+    return path
+
+
+@pytest.fixture
+def notes(tmp_path):
+    path = tmp_path / "notes.md"
+    path.write_text(
+        "# Groups\nintro\n## Cosets\nbody\n```\n# not a heading\n```\n# Rings\nend\n"
+    )
+    return path
+
+
+def test_pdf_source_reports_page_count(book):
+    src = open_source(book)
+    assert src.kind == "pdf" and src.length == 5
+
+
+def test_text_source_length_is_line_count(notes):
+    src = open_source(notes)
+    assert src.kind == "text" and src.length == 9
+
+
+def test_missing_file_is_rejected(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        open_source(tmp_path / "missing.pdf")
+
+
+def test_corrupt_pdf_is_a_value_error(tmp_path):
+    p = tmp_path / "bad.pdf"
+    p.write_text("not a pdf")
+    with pytest.raises(ValueError, match="Cannot open"):
+        open_source(p)
+
+
+def test_encrypted_pdf_is_rejected_up_front(tmp_path):
+    p = tmp_path / "locked.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(p, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="u", owner_pw="o")
+    with pytest.raises(ValueError, match="password"):
+        open_source(p)
+
+
+def test_text_is_read_as_utf8(tmp_path):
+    p = tmp_path / "n.md"
+    p.write_bytes("# Part 1 — Euler’s idea\n".encode())
+    assert outline(open_source(p)) == [(1, "Part 1 — Euler’s idea", 1)]
+
+
+def test_dangling_bookmarks_are_dropped(tmp_path):
+    p = tmp_path / "b.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.set_toc([[1, "Real", 1], [1, "Nowhere", -1]])
+    doc.save(p)
+    assert outline(open_source(p)) == [(1, "Real", 1)]
+
+
+def test_unsupported_extension_is_rejected(tmp_path):
+    p = tmp_path / "book.epub"
+    p.write_text("x")
+    with pytest.raises(ValueError, match="Unsupported"):
+        open_source(p)
+
+
+def test_pdf_outline_comes_from_bookmarks(book):
+    assert outline(open_source(book)) == [
+        (1, "Chapter 1", 1),
+        (2, "Section 1.1", 2),
+        (1, "Chapter 2", 4),
+    ]
+
+
+def test_markdown_outline_skips_code_fences(notes):
+    assert outline(open_source(notes)) == [
+        (1, "Groups", 1),
+        (2, "Cosets", 3),
+        (1, "Rings", 8),
+    ]
+
+
+def test_extract_pdf_page_range_is_one_based_inclusive(book):
+    text = extract_text(open_source(book), 2, 3)
+    assert "Page 2 body" in text and "Page 3 body" in text
+    assert "Page 1 body" not in text and "Page 4 body" not in text
+
+
+def test_extract_whole_source_by_default(notes):
+    assert extract_text(open_source(notes)) == notes.read_text()
+
+
+def test_extract_text_line_range(notes):
+    assert extract_text(open_source(notes), 3, 4) == "## Cosets\nbody\n"
+
+
+@pytest.mark.parametrize("start,end", [(0, 2), (3, 2), (4, 6)])
+def test_out_of_range_is_rejected(book, start, end):
+    with pytest.raises(ValueError, match="range"):
+        extract_text(open_source(book), start, end)
+
+
+def test_slice_pdf_keeps_only_requested_pages(book, tmp_path):
+    out = slice_pdf(open_source(book), 4, 5, tmp_path / "ep.pdf")
+    with pymupdf.open(out) as doc:
+        assert doc.page_count == 2
+        assert "Page 4 body" in doc[0].get_text()
+
+
+def test_slice_rejects_text_source(notes, tmp_path):
+    with pytest.raises(ValueError, match="PDF"):
+        slice_pdf(open_source(notes), 1, 2, tmp_path / "x.pdf")
+
+
+def test_heading_keeps_hashes_that_belong_to_the_title(tmp_path):
+    p = tmp_path / "langs.md"
+    p.write_text("# C#\n## F# basics ##\n### Closed ###\n")
+    assert outline(open_source(p)) == [
+        (1, "C#", 1),
+        (2, "F# basics", 2),
+        (3, "Closed", 3),
+    ]
