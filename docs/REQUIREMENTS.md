@@ -37,7 +37,8 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 - `lecture-forge render <slug> [--episode N | --all]`
 - Uses ElevenLabs with model **`eleven_v3`** (the default; overridable with `ELEVENLABS_MODEL_ID`).
 - `eleven_v3` accepts at most **5,000 characters per request**, so the script is split at paragraph boundaries into pieces of 5,000 characters or fewer. A 25-minute episode is about 25,000 characters, which is 5–6 requests. The limit is looked up per model, so switching models adjusts the piece size.
-- `eleven_v3` does **not** support request stitching. Instead, every piece uses the same voice settings and the same fixed `seed`, and the joins fall on paragraph breaks where a pause is natural anyway. The pieces are joined with ffmpeg. If the joins are audible, switch to a model that supports stitching (`eleven_v4`, `eleven_multilingual_v2`) and send `previous_request_ids` with each request.
+- `eleven_v3` does **not** support request stitching. Instead, every piece uses the same voice settings and the same fixed `seed`. That reduces variation between pieces but doesn't guarantee identical delivery. The joins fall on paragraph breaks, where a pause is natural anyway. The pieces are joined with ffmpeg.
+- For models that **do** support stitching (`eleven_v4`, `eleven_multilingual_v2`), `render` automatically sends the previous pieces' `previous_request_ids`. If the `eleven_v3` joins are audible, setting `ELEVENLABS_MODEL_ID` to one of those models is therefore all it takes.
 - ID3 tags: album = series title, track = episode number, title = episode title, artist = "lecture-forge".
 - Output: `<output_dir>/<series>/NN - <title>.mp3`. The default `output_dir` is `/mnt/d/Dropbox/Lectures` (`D:\Dropbox\Lectures`).
 - Running it again is safe: an episode whose `script.txt` hash hasn't changed is skipped, so credits aren't spent twice.
@@ -64,7 +65,7 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 
 - `.env` (git-ignored): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, optional `ELEVENLABS_MODEL_ID` (default `eleven_v3`), optional `STYLE_GUIDE_PATH`, plus `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as needed.
 - `config.toml`: provider, LLM models, voice settings and seed, `output_dir`.
-- **Style guide:** this is your own prompt file, and it is **not** stored in the repo. It is loaded from `STYLE_GUIDE_PATH`, or from `prompts/style-guide.md` (git-ignored) if that isn't set, and split by its `## Part N` headings. If it's missing, the command exits with a message saying where to put it.
+- **Style guide:** this is your own prompt file, and it is **not** tracked in the repo. It is loaded from `STYLE_GUIDE_PATH`, or from `prompts/style-guide.md` (git-ignored) if that isn't set, and split by its `## Part N` headings. If it's missing, the command exits with a message saying where to put it.
 
 ## State
 
@@ -89,4 +90,4 @@ All three providers implement one interface: `complete(system, user, pdf: (path,
 5. **M5:** `render` (ElevenLabs, chunking, ffmpeg, ID3, idempotency).
 6. **M6:** `run --auto`; end-to-end test on a real chapter.
 7. **Later:** GUI over the same core.
-8. **Later:** custom pronunciation. Turn the pronunciation hints in each episode's production notes into an ElevenLabs pronunciation dictionary, applied at render time. *Deferred: tracked in a GitHub issue.*
+8. **Later:** custom pronunciation. Turn the pronunciation hints in each episode's production notes into an ElevenLabs pronunciation dictionary, applied at render time. *Deferred: tracked in [#1](https://github.com/frankbria/lecture-forge/issues/1).*
