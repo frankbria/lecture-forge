@@ -3,3 +3,9 @@ series/
 *.mp3
 prompts/style-guide.md
 *.swp
+__pycache__/
+.venv/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
