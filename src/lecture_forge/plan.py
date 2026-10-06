@@ -1,6 +1,7 @@
 """Plan a series: the LLM proposes where the episode breaks go; we validate and write plan.yaml."""
 
 import json
+import math
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -106,8 +107,14 @@ def validate(plan: dict, lo: int, hi: int) -> list[str]:
             if not isinstance(e.get(key), str) or not e[key].strip():
                 errors.append(f"{where}: {key} is missing")
         m = e.get("est_minutes")
-        if isinstance(m, bool) or not isinstance(m, int | float) or m <= 0:
-            errors.append(f"{where}: est_minutes must be a positive number")
+        # json.loads accepts NaN/Infinity, and NaN slips past every comparison
+        if (
+            isinstance(m, bool)
+            or not isinstance(m, int | float)
+            or not math.isfinite(m)
+            or m <= 0
+        ):
+            errors.append(f"{where}: est_minutes must be a positive finite number")
         elif m > MAX_MINUTES:
             errors.append(
                 f"{where}: ~{m} minutes is over {MAX_MINUTES} minutes; "

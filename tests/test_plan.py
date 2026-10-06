@@ -103,6 +103,8 @@ def test_valid_plan_has_no_errors():
         ([episode(4, 6), episode(1, 3)], "overlaps or comes before"),
         ([episode(1, 6, minutes=MAX_MINUTES + 5)], f"over {MAX_MINUTES} minutes"),
         ([episode(1, 6, minutes="long")], "est_minutes"),
+        ([episode(1, 6, minutes=float("nan"))], "est_minutes"),
+        ([episode(1, 6, minutes=float("inf"))], "est_minutes"),
         ([episode(1, 6, title="")], "title"),
         ([episode(1, 6, central_idea=None)], "central_idea"),
         ([episode(1.5, 6)], "start"),
@@ -176,6 +178,21 @@ def test_plan_that_stays_invalid_fails(book):
         make_plan(
             book, GUIDE, 1, 6, lambda s, u, p: plan_json(episode(1, 6, minutes=90))
         )
+
+
+def test_nan_minutes_from_raw_json_is_repaired_not_saved(book):
+    nan_reply = plan_json(episode(1, 6)).replace(
+        '"est_minutes": 25', '"est_minutes": NaN'
+    )
+    replies = iter([nan_reply, plan_json(episode(1, 6))])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    assert make_plan(book, GUIDE, 1, 6, call)["episodes"][0]["est_minutes"] == 25
+    assert len(prompts) == 2 and "est_minutes" in prompts[1]
 
 
 def test_unparseable_reply_is_also_repaired(book):

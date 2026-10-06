@@ -11,3 +11,4 @@ Process and tooling lessons from working on this repo. Code and product follow-u
 - **The pre-commit hook in `.git/hooks` applies to every branch.** Branches that predate `.pre-commit-config.yaml` need `PRE_COMMIT_ALLOW_NO_CONFIG=1`.
 - **Check for conflict markers before `git rebase --continue`.** A failed file write followed by `git add` staged `.env.example` with `<<<<<<<` markers still in it (caught and amended before pushing). Run `git diff --check` or grep for markers after resolving.
 - **opencode/GLM stalled on every review in this run** (exit 75, even run sequentially). codex did all three PRs. Re-test opencode before assuming it's back.
+- **opencode stalls on review-sized prompts, not on everything** (2026-10-05, PR #9). A trivial "PONG" probe answered in seconds; the 37 KB review prompt stalled (exit 75). A passing probe doesn't mean a review will run. Go straight to codex for diffs over ~20 KB until that changes.
