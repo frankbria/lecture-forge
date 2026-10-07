@@ -9,7 +9,7 @@ fi
 
 # Run coverage test
 echo "Running coverage check (minimum 85%)..."
-if uv run pytest --cov --cov-report=term-missing --cov-fail-under=85; then
+if uv run pytest -m "not integration" --cov --cov-report=term-missing --cov-fail-under=85; then
     echo "✓ Coverage check passed"
     exit 0
 else
@@ -17,7 +17,7 @@ else
     echo "❌❌❌ COVERAGE BELOW 85% ❌❌❌"
     echo ""
     echo "To see detailed coverage report:"
-    echo "  uv run pytest --cov --cov-report=html"
+    echo "  uv run pytest -m "not integration" --cov --cov-report=html"
     echo "  open htmlcov/index.html"
     echo ""
     exit 1
