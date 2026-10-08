@@ -84,7 +84,7 @@ def stale_reason(series_dir: Path, plan: dict, ep: dict) -> str:
     try:
         meta = json.loads(path.read_text(encoding="utf-8"))
         unit, start, end = meta["unit"], meta["start"], meta["end"]
-    except (ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError):
         return unreadable
     if type(start) is not int or type(end) is not int:
         return unreadable

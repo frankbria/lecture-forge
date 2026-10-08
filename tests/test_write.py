@@ -665,3 +665,13 @@ def test_write_one_stale_episode_needs_no_force(project, book, capsys):
     make_plan_file(root, book, [(1, [1, 3]), (2, [5, 6])])
     assert main(["write", "algebra", "--episode", "2", "--auto"]) == 0
     assert "plan changed" in capsys.readouterr().out and len(calls) == 6
+
+
+def test_written_json_that_cannot_be_read_is_stale(tmp_path, book):
+    plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 3])]))
+    sdir, ep = tmp_path / "series" / "algebra", plan["episodes"][0]
+    d = episode_dir(sdir, 1)
+    (d / "written.json").mkdir(parents=True)  # read_text raises an OSError
+    (d / "script.txt").write_text("words\n", encoding="utf-8")
+    assert script_state(sdir, plan, ep) == "stale"
+    assert stale_reason(sdir, plan, ep) == "its written.json is unreadable"
