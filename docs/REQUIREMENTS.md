@@ -59,8 +59,8 @@ source ──plan──▶ plan.yaml ──(you edit)──▶ write ──▶ d
 - **Join and tag:** ffmpeg concatenates the pieces and writes ID3v2.3 tags (title, album = series title, artist and album artist = author, track `n/last`, genre Speech). The file is published atomically, so Dropbox never syncs a half-written file.
 - **Output:** `<output_dir>/<series title>/NN - <episode title>.mp3` (default `output_dir` `/mnt/d/Dropbox/Lectures`, i.e. `D:\Dropbox\Lectures`).
   - Titles come from the LLM-written plan, so they're sanitized for Windows: no `<>:"/\|?*` or control characters, no trailing dots, reserved names (CON, COM1…) prefixed, at most 120 characters.
-  - The output folder is created only if its parent exists. If the drive isn't mounted, the command fails rather than inventing a Linux-only folder.
-  - If an episode was renamed since it was last rendered, its previous MP3 is removed: only an `.mp3` for that episode number inside the output folder, so the playlist never has duplicates.
+  - The output folder is created only if its parent exists. If the drive isn't mounted, the command fails rather than inventing a Linux-only folder. Folders are created only when an episode is actually rendered, never by the cost preview, so a declined render leaves nothing in Dropbox.
+  - If an episode was renamed since it was last rendered, its previous MP3 is removed: only an `.mp3` for that episode number inside the output folder, so the playlist never has duplicates. It is never removed when it is the same file as the new MP3, e.g. after a capitalization-only rename on the case-insensitive Dropbox drive.
 - Transient ElevenLabs errors (408, 409, 429, 5xx, network) are retried with backoff (10, 20, 40 s). Other errors fail with ElevenLabs' message.
 - Tests: the real ElevenLabs integration test runs only with `LECTURE_FORGE_PAID_TESTS=1`, so routine test runs never spend credits.
 
