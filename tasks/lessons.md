@@ -32,3 +32,9 @@ Process and tooling lessons from working on this repo. Code and product follow-u
 - **The `feature-dev:code-reviewer` agent has no shell.** It couldn't run `git diff` or pytest, so it reviewed the post-change files and couldn't confirm which test assertions had changed. Paste the diff into its prompt (as the opencode review does), or use an agent type with Bash.
 - **Demo error-path fixes before and after through the real CLI.** A torn marker, a read-only folder and a stand-in `claude` on PATH reproduced three tracebacks on main at zero cost, and showed the PR's `error:` lines. That is stronger evidence than the unit tests alone.
 
+
+## 2026-10-08: implementing #33 (PR #41)
+
+- **Never undo a mutation with `git checkout <file>`.** It resets the file to HEAD, so it also wiped the uncommitted fix the mutation was testing. A backup copy made just before the mutation saved it. Commit before mutation checks, or undo the mutation with the reverse edit.
+- **opencode finished two reviews of ~20 KB diffs** (about 5 minutes each, run one after another in the background with `timeout 900`). The "go straight to codex over ~20 KB" lesson from PR #9 no longer holds. Try opencode first and fall back to codex on a stall.
+- **Run zero-credit demos from a scratch folder.** `load_settings` reads `.env` from the current folder, so a folder without one loads no real keys. The installed `lecture-forge` (main) and the worktree's `.venv/bin/lecture-forge` (the branch) give before/after runs side by side. A stand-in `claude` on PATH replaces the model.
