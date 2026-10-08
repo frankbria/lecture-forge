@@ -78,11 +78,16 @@ def stale_reason(series_dir: Path, plan: dict, ep: dict) -> str:
     path = episode_dir(series_dir, ep["n"]) / "written.json"
     if not path.exists():
         return ""
+    unreadable = (
+        "its written.json is unreadable"  # torn or hand-edited: can't vouch for it
+    )
     try:
         meta = json.loads(path.read_text(encoding="utf-8"))
         unit, start, end = meta["unit"], meta["start"], meta["end"]
-    except (ValueError, TypeError, KeyError):  # torn or hand-edited: can't vouch for it
-        return "its written.json is unreadable"
+    except (ValueError, TypeError, KeyError):
+        return unreadable
+    if type(start) is not int or type(end) is not int:
+        return unreadable
     want = plan["unit"]
     if unit != want:
         return f"written from {unit} {start}-{end}, the plan now uses {want}"

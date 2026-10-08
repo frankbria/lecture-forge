@@ -624,6 +624,10 @@ def test_script_state_is_current(tmp_path, book, meta):
         ("{torn", "its written.json is unreadable"),
         ("[1, 3]", "its written.json is unreadable"),
         ({"unit": "pages"}, "its written.json is unreadable"),
+        (  # hand-edited: never "written for pages 1-3, the plan now says pages 1-3"
+            {"source": "x", "unit": "pages", "start": "1", "end": 3},
+            "its written.json is unreadable",
+        ),
     ],
 )
 def test_script_state_is_stale(tmp_path, book, meta, reason):

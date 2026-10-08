@@ -529,3 +529,9 @@ def test_render_all_skips_a_stale_script_and_spends_nothing_on_it(project, capsy
     assert main(["render", "algebra", "--episode", "1", "--yes"]) == 1
     assert "no longer matches" in capsys.readouterr().err
     assert len(tts.calls) == 2  # episode 2's two pieces; episode 1 would add two more
+
+
+def test_render_one_unwritten_episode_is_an_error(project, capsys):
+    _, tts = project
+    assert main(["render", "algebra", "--episode", "3", "--yes"]) == 1
+    assert "write episode 3 first" in capsys.readouterr().err and tts.calls == []
