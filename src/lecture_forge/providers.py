@@ -101,11 +101,16 @@ def _claude_code(system: str, user: str, pdf: Path | None, settings: Settings) -
     except json.JSONDecodeError:
         detail = (proc.stderr or proc.stdout).strip()[-500:]
         raise ProviderError(name, f"exit {proc.returncode}: {detail}", True) from None
+    unexpected = ProviderError(name, f"unexpected reply: {proc.stdout.strip()[:200]}")
+    if not isinstance(out, dict):
+        raise unexpected
     if out.get("is_error"):
         status = out.get("api_error_status")
         raise ProviderError(
             name, out.get("result") or out.get("subtype"), retryable_status(status)
         )
+    if not isinstance(out.get("result"), str):
+        raise unexpected
     return out["result"]
 
 

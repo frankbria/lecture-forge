@@ -223,7 +223,15 @@ def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
         "output": str(out),
     }
     marker = episode_dir(series_dir, ep["n"]) / "render.json"
-    previous = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
+    previous = {}
+    if marker.exists():
+        try:
+            previous = json.loads(marker.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            previous = None
+        if not isinstance(previous, dict):  # torn by a crash, or hand-edited
+            log.warning("%s is unreadable; rebuilding from cached pieces", marker)
+            previous = {}
     return script, out, state, previous, out.exists() and previous == state
 
 

@@ -393,3 +393,14 @@ def test_switching_provider_drops_the_old_providers_model(fake, monkeypatch):
         now, "s", "u2", interactive=True, ask=lambda _: pytest.fail("asked again")
     )
     assert (later.provider, later.llm_model, seen) == ("openai", "", ["", ""])
+
+
+@pytest.mark.parametrize("reply_value", [[], {"is_error": False}, {"result": 7}])
+def test_unexpected_claude_reply_is_a_provider_error(fake_claude, reply_value):
+    reply, _ = fake_claude
+    reply(reply_value)
+    with pytest.raises(ProviderError, match="unexpected reply"):
+        complete(
+            "claude-code", "s", "u", settings=settings(),
+            sleep=lambda _: pytest.fail("retried"),
+        )  # fmt: skip
