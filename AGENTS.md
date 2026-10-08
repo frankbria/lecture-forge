@@ -16,6 +16,7 @@ uv run ruff format --check .
 - Never run pytest without `-m "not integration"` unless asked: integration tests call Claude Code on the owner's subscription.
 - Never read or print `.env` (real keys). The app reads it with `dotenv_values`; never call `load_dotenv()`.
 - Never modify `series/` (the owner's plans, scripts and paid audio cache) or the output folder (`LECTURE_FORGE_OUTPUT_DIR`, default `/mnt/d/Dropbox/Lectures`).
+- Make code changes in a separate git worktree (e.g. `git worktree add ../lecture-forge-wt-<n> -b <branch> main`), never in the main checkout: the owner's `lecture-forge` command is an editable install that runs the main checkout's code, and may be rendering (spending credits) while you work.
 - Never commit PDFs or other source books: this repo is public.
 - New tests that touch a billed API use a fake key or the `paid` marker; `tests/conftest.py` blocks real keys otherwise.
 

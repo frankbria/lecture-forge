@@ -20,3 +20,10 @@ Process and tooling lessons from working on this repo. Code and product follow-u
 - **The spending policy lives on a branch until it merges.** The duplicate M5 demo spent ~5,100 ElevenLabs characters (more than the ~400 a demo is allowed) because the policy in REQUIREMENTS was only on PR #14's branch. Demos default to 0 characters: real CLI for cost, skip and refusal paths, plus a stand-in TTS returning ffmpeg-made MP3s through the real `render_episode`.
 - **`showboat verify` re-executes every block.** On a stateful demo (renames, cache deletion) the diff fails as expected. Never run it on a demo whose blocks could spend money: keep `--yes` out of every block, so a re-run can't pay.
 - **Use absolute paths for `rm` in Bash.** A `cd dir && … rm -rf rel/*` command is blocked whole by the harness safety check (the target can't be resolved), so the steps before it in the same command don't run either.
+
+## 2026-10-07: implementing #25 (PR #36)
+
+- **Work in a worktree when the owner runs the editable install.** `uv tool install --editable .` makes `lecture-forge` run the main checkout's code. #25 was first implemented on a branch in that checkout, including mutation checks that briefly broke `render.py`, while the owner was rendering paid episodes from it. Moved to a worktree mid-run; the rule is now in AGENTS.md.
+- **A demo on the real filesystem type beats a unit test for platform bugs.** The case-only-rename bug only exists on case-insensitive drives. Linux tests can't show it. A scratch folder on `/mnt/c` (the same drvfs type as the Dropbox `D:`) reproduced it with main's code and verified the fix, at zero credits.
+- **Prefer exact checks over heuristics a reviewer can break.** The plan's `casefold()` name compare had false positives (ß/ss) and left duplicates on case-sensitive drives. `os.path.samefile`, verified on the real drive first, is exact.
+
