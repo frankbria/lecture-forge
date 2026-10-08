@@ -450,3 +450,24 @@ def test_old_output_outside_the_lecture_folder_is_never_deleted(series, tmp_path
     marker.write_text(json.dumps(state), encoding="utf-8")
     run(series, tmp_path, FakeTTS(beep))
     assert keep.read_bytes() == b"not ours"
+
+
+def test_cost_preview_creates_no_folders(series, tmp_path):
+    """A declined render must not leave an empty album folder in Dropbox."""
+    plan = load_plan(series / "plan.yaml")
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) > 0
+    assert not (tmp_path / "Lectures").exists()
+
+
+def test_case_only_title_change_never_deletes_the_new_mp3(series, tmp_path, beep):
+    """On a case-insensitive drive (the Dropbox D: drive) both names are one file."""
+    first = run(series, tmp_path, FakeTTS(beep))
+    plan_path = series / "plan.yaml"
+    data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    data["episodes"][0]["title"] = "COSETS: EQUAL PIECES?"
+    plan_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    second = run(series, tmp_path, FakeTTS(beep))
+    assert (
+        second.path.name == "01 - COSETS - EQUAL PIECES.mp3" and second.path.is_file()
+    )
+    assert first.path.is_file()  # differs only in case: never deleted
