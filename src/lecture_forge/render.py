@@ -20,7 +20,7 @@ from elevenlabs.core.api_error import ApiError
 from lecture_forge.config import Settings
 from lecture_forge.plan import save
 from lecture_forge.providers import retryable_status
-from lecture_forge.write import episode_dir
+from lecture_forge.write import episode_dir, script_state, stale_reason
 
 log = logging.getLogger(__name__)
 
@@ -202,16 +202,22 @@ def characters_left(settings: Settings) -> int | None:
 # --- rendering ------------------------------------------------------------------------------
 
 
-def _script(series_dir: Path, ep: dict) -> str:
-    path = episode_dir(series_dir, ep["n"]) / "script.txt"
-    if not path.exists():
-        raise RenderError(f"write episode {ep['n']} first (lecture-forge write)")
-    return path.read_text(encoding="utf-8")
+def _script(series_dir: Path, plan: dict, ep: dict) -> str:
+    n, state = ep["n"], script_state(series_dir, plan, ep)
+    if state == "missing":
+        raise RenderError(f"write episode {n} first (lecture-forge write)")
+    if state == "stale":
+        raise RenderError(
+            f"episode {n}'s script no longer matches the plan "
+            f"({stale_reason(series_dir, plan, ep)}); rewrite it: "
+            f"lecture-forge write {Path(series_dir).name} --episode {n} --force"
+        )
+    return (episode_dir(series_dir, n) / "script.txt").read_text(encoding="utf-8")
 
 
 def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
     """(script, output MP3, render state, previous state, up to date) for one episode."""
-    script = _script(series_dir, ep)
+    script = _script(series_dir, plan, ep)
     out = (
         _album_path(settings, plan)
         / f"{ep['n']:02d} - {safe_filename(ep['title'])}.mp3"
