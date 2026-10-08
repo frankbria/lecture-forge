@@ -450,3 +450,39 @@ def test_old_output_outside_the_lecture_folder_is_never_deleted(series, tmp_path
     marker.write_text(json.dumps(state), encoding="utf-8")
     run(series, tmp_path, FakeTTS(beep))
     assert keep.read_bytes() == b"not ours"
+
+
+def test_cost_preview_creates_no_folders(series, tmp_path):
+    """A declined render must not leave an empty album folder in Dropbox."""
+    plan = load_plan(series / "plan.yaml")
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) > 0
+    assert not (tmp_path / "Lectures").exists()
+
+
+def _retitle(series, title):
+    plan_path = series / "plan.yaml"
+    data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    data["episodes"][0]["title"] = title
+    plan_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_old_path_that_is_the_new_file_is_never_deleted(series, tmp_path, beep):
+    """On the case-insensitive Dropbox drive, a case-only rename leaves old and new
+    names pointing at one file. A symlink is the same situation on Linux."""
+    first = run(series, tmp_path, FakeTTS(beep))
+    _retitle(series, "COSETS: EQUAL PIECES?")
+    new = first.path.with_name("01 - COSETS - EQUAL PIECES.mp3")
+    first.path.unlink()
+    first.path.symlink_to(new.name)  # the old name now resolves to the new file
+    second = run(series, tmp_path, FakeTTS(beep))
+    assert second.path == new and new.is_file()
+    assert first.path.is_symlink()  # same file as the new MP3: not deleted
+
+
+def test_case_only_rename_on_a_case_sensitive_drive_leaves_no_duplicate(
+    series, tmp_path, beep
+):
+    first = run(series, tmp_path, FakeTTS(beep))
+    _retitle(series, "COSETS: EQUAL PIECES?")
+    second = run(series, tmp_path, FakeTTS(beep))
+    assert second.path.is_file() and not first.path.exists()

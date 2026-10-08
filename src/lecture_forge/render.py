@@ -114,20 +114,16 @@ def safe_filename(name: str) -> str:
     return "_" + s if s.split(".")[0].upper() in RESERVED else s
 
 
-def _album_dir(settings: Settings, plan: dict) -> Path:
+def _album_path(settings: Settings, plan: dict) -> Path:
+    """The series' folder in the output dir. Creates nothing: the cost preview uses it too."""
     base = settings.output_dir
-    if not base.exists():
-        if (
-            not base.parent.exists()
-        ):  # e.g. D: not mounted: don't invent a Linux-only folder
-            raise RenderError(
-                f"{base.parent} does not exist (is the drive mounted?); "
-                "set LECTURE_FORGE_OUTPUT_DIR to a folder that does"
-            )
-        base.mkdir()
-    album = base / safe_filename(plan["title"])
-    album.mkdir(exist_ok=True)
-    return album
+    # e.g. D: not mounted: don't invent a Linux-only folder
+    if not base.parent.exists():
+        raise RenderError(
+            f"{base.parent} does not exist (is the drive mounted?); "
+            "set LECTURE_FORGE_OUTPUT_DIR to a folder that does"
+        )
+    return base / safe_filename(plan["title"])
 
 
 def _keyed(settings: Settings, pieces: list[str]) -> list[tuple[str, str]]:
@@ -216,7 +212,8 @@ def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
     """(script, output MP3, render state, previous state, up to date) for one episode."""
     script = _script(series_dir, ep)
     out = (
-        _album_dir(settings, plan) / f"{ep['n']:02d} - {safe_filename(ep['title'])}.mp3"
+        _album_path(settings, plan)
+        / f"{ep['n']:02d} - {safe_filename(ep['title'])}.mp3"
     )
     state = {
         "script_sha256": hashlib.sha256(script.encode()).hexdigest(),
@@ -276,6 +273,9 @@ def render_episode(
     script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings)
     if up_to_date and not force:
         return Rendered(out, 0, 0, True)
+    # Folders only now, after the skip check: a cost preview or a skip creates nothing.
+    out.parent.parent.mkdir(exist_ok=True)  # the output dir; its parent was checked
+    out.parent.mkdir(exist_ok=True)
     d = episode_dir(series_dir, ep["n"])
     marker = d / "render.json"
     audio_dir = d / "audio"
@@ -316,6 +316,9 @@ def _remove_replaced(old: str | None, new: Path, settings: Settings, n: int) -> 
     if not old:
         return
     old_path = Path(old)
+    # On a case-insensitive drive (Dropbox on D:) a case-only rename is the same file.
+    if old_path.exists() and new.exists() and os.path.samefile(old_path, new):
+        return
     base = settings.output_dir.resolve()
     if (
         old_path != new
