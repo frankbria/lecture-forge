@@ -227,7 +227,9 @@ def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
     if marker.exists():
         try:
             previous = json.loads(marker.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (
+            ValueError
+        ):  # bad JSON or not UTF-8 (JSONDecodeError, UnicodeDecodeError)
             previous = None
         if not isinstance(previous, dict):  # torn by a crash, or hand-edited
             log.warning("%s is unreadable; rebuilding from cached pieces", marker)

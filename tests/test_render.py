@@ -452,12 +452,12 @@ def test_old_output_outside_the_lecture_folder_is_never_deleted(series, tmp_path
     assert keep.read_bytes() == b"not ours"
 
 
-@pytest.mark.parametrize("torn", ['{"script_sha', "[]"])
+@pytest.mark.parametrize("torn", [b'{"script_sha', b"[]", b"\xff\xfe{\x00"])
 def test_torn_render_marker_is_rebuilt_from_cache(series, tmp_path, beep, torn):
     """A crash mid-write (or a hand edit) must not block the episode forever."""
     run(series, tmp_path, FakeTTS(beep))
     marker = episode_dir(series, 1) / "render.json"
-    marker.write_text(torn, encoding="utf-8")
+    marker.write_bytes(torn)  # last case: re-saved as UTF-16 by an editor
     result = run(series, tmp_path, FakeTTS(beep))
     assert not result.skipped and result.billed == 0 and result.path.is_file()
     assert json.loads(marker.read_text(encoding="utf-8"))["model"] == "eleven_v3"
