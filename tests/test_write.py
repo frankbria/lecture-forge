@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from pathlib import Path
@@ -15,7 +16,9 @@ from lecture_forge.write import (
     WriteError,
     episode_dir,
     fill_template,
+    script_state,
     sections,
+    stale_reason,
     write_episode,
 )
 
@@ -246,6 +249,13 @@ def test_first_episode_two_passes_and_all_files(tmp_path, book):
     ):
         assert (d / f).read_text(encoding="utf-8").strip(), f
     assert (d / "script.txt").read_text(encoding="utf-8") == SCRIPT.strip() + "\n"
+    written = json.loads((d / "written.json").read_text(encoding="utf-8"))
+    assert written == {
+        "source": str(book.resolve()),
+        "unit": "pages",
+        "start": 1,
+        "end": 3,
+    }
     assert result.words == len(SCRIPT.split()) and result.minutes == pytest.approx(
         result.words / 150
     )
@@ -557,6 +567,111 @@ def test_files_are_published_atomically(tmp_path, book, monkeypatch):
     )
     replies = iter([draft_reply(), critique_reply()])
     run(tmp_path, book, lambda s, u, p: next(replies))
-    assert published[-1] == "script.txt"  # the done marker goes last
+    assert published[-2:] == ["written.json", "script.txt"]  # the done marker goes last
     assert {"critique.md", "puzzle_answer.md", "summary.md"} <= set(published)
     assert not list(episode_dir(tmp_path / "series" / "algebra", 1).glob("*.tmp"))
+
+
+# --- is a script still the one the plan asks for? ---------------------------------------
+
+
+def _state(tmp_path, book, meta, episodes=((1, [1, 3]),), unit="pages"):
+    """script_state and stale_reason of episode 1, written with this written.json."""
+    plan = load_plan(make_plan_file(tmp_path, book, list(episodes), unit=unit))
+    sdir = tmp_path / "series" / "algebra"
+    d = episode_dir(sdir, 1)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "script.txt").write_text("words\n", encoding="utf-8")
+    if meta is not None:
+        (d / "written.json").write_text(
+            meta if isinstance(meta, str) else json.dumps(meta), encoding="utf-8"
+        )
+    ep = plan["episodes"][0]
+    return script_state(sdir, plan, ep), stale_reason(sdir, plan, ep)
+
+
+def test_script_state_is_missing_without_a_script(tmp_path, book):
+    plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 3])]))
+    assert (
+        script_state(tmp_path / "series" / "algebra", plan, plan["episodes"][0])
+        == "missing"
+    )
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        None,  # legacy: written before written.json existed, so trusted
+        {"source": "x", "unit": "pages", "start": 1, "end": 3},
+        {"source": "/moved/elsewhere.pdf", "unit": "pages", "start": 1, "end": 3},
+    ],
+)
+def test_script_state_is_current(tmp_path, book, meta):
+    assert _state(tmp_path, book, meta)[0] == "current"
+
+
+@pytest.mark.parametrize(
+    "meta,reason",
+    [
+        (
+            {"source": "x", "unit": "pages", "start": 1, "end": 2},
+            "written for pages 1-2, the plan now says pages 1-3",
+        ),
+        (
+            {"source": "x", "unit": "lines", "start": 1, "end": 3},
+            "written from lines 1-3, the plan now uses pages",
+        ),
+        ("{torn", "its written.json is unreadable"),
+        ("[1, 3]", "its written.json is unreadable"),
+        ({"unit": "pages"}, "its written.json is unreadable"),
+        (  # hand-edited: never "written for pages 1-3, the plan now says pages 1-3"
+            {"source": "x", "unit": "pages", "start": "1", "end": 3},
+            "its written.json is unreadable",
+        ),
+    ],
+)
+def test_script_state_is_stale(tmp_path, book, meta, reason):
+    assert _state(tmp_path, book, meta) == ("stale", reason)
+
+
+def test_episode_after_a_stale_one_is_refused(tmp_path, book):
+    replies = iter([draft_reply(), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    with pytest.raises(WriteError, match="rewrite episode 1 first"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), n=2,
+            episodes=((1, [1, 2]), (2, [3, 6])))  # fmt: skip
+
+
+def test_write_rewrites_an_episode_whose_range_changed(project, book, capsys):
+    root, calls = project
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    capsys.readouterr()
+    make_plan_file(root, book, [(1, [1, 3]), (2, [5, 6])])
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    out = capsys.readouterr().out
+    assert "Episode 1: Episode 1: already written, skipping" in out
+    assert (
+        "Episode 2: Episode 2: plan changed (written for pages 4-6, the plan now says "
+        "pages 5-6), rewriting" in out
+    )
+    assert len(calls) == 6  # 4 for the first run, 2 for episode 2's rewrite
+    meta = root / "series/algebra/episodes/02/written.json"
+    assert json.loads(meta.read_text(encoding="utf-8"))["start"] == 5
+
+
+def test_write_one_stale_episode_needs_no_force(project, book, capsys):
+    root, calls = project
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    make_plan_file(root, book, [(1, [1, 3]), (2, [5, 6])])
+    assert main(["write", "algebra", "--episode", "2", "--auto"]) == 0
+    assert "plan changed" in capsys.readouterr().out and len(calls) == 6
+
+
+def test_written_json_that_cannot_be_read_is_stale(tmp_path, book):
+    plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 3])]))
+    sdir, ep = tmp_path / "series" / "algebra", plan["episodes"][0]
+    d = episode_dir(sdir, 1)
+    (d / "written.json").mkdir(parents=True)  # read_text raises an OSError
+    (d / "script.txt").write_text("words\n", encoding="utf-8")
+    assert script_state(sdir, plan, ep) == "stale"
+    assert stale_reason(sdir, plan, ep) == "its written.json is unreadable"

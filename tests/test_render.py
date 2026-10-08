@@ -497,3 +497,43 @@ def test_case_only_rename_on_a_case_sensitive_drive_leaves_no_duplicate(
     _retitle(series, "COSETS: EQUAL PIECES?")
     second = run(series, tmp_path, FakeTTS(beep))
     assert second.path.is_file() and not first.path.exists()
+
+
+def _stale(series):
+    """Episode 1's script was written for line 2; the plan now says line 1."""
+    meta = {"source": "x", "unit": "lines", "start": 2, "end": 2}
+    (episode_dir(series, 1) / "written.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+
+
+def test_script_written_for_another_range_is_never_rendered(series, tmp_path, beep):
+    _stale(series)
+    tts = FakeTTS(beep)
+    with pytest.raises(RenderError, match="no longer matches") as e:
+        run(series, tmp_path, tts)
+    assert "written for lines 2-2, the plan now says lines 1-1" in str(e.value)
+    assert str(e.value).endswith(
+        "lecture-forge write algebra --episode 1"
+    )  # no --force needed
+    assert tts.calls == []
+
+
+def test_render_all_skips_a_stale_script_and_spends_nothing_on_it(project, capsys):
+    root, tts = project
+    _stale(root / "series" / "algebra")
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "Episode 1: Cosets: Equal Pieces?: script no longer matches the plan" in out
+    assert [p.name for p in (root / "Lectures").rglob("*.mp3")] == [
+        "02 - Rings-Ideals.mp3"
+    ]
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 1
+    assert "no longer matches" in capsys.readouterr().err
+    assert len(tts.calls) == 2  # episode 2's two pieces; episode 1 would add two more
+
+
+def test_render_one_unwritten_episode_is_an_error(project, capsys):
+    _, tts = project
+    assert main(["render", "algebra", "--episode", "3", "--yes"]) == 1
+    assert "write episode 3 first" in capsys.readouterr().err and tts.calls == []

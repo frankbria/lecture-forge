@@ -1,5 +1,6 @@
 """Write one episode: a script pass (style guide Part 1), then a critique pass (Part 2)."""
 
+import json
 import re
 import tempfile
 from collections.abc import Callable
@@ -67,6 +68,40 @@ def _spoken(script: str) -> str:
 
 def episode_dir(series_dir: Path, n: int) -> Path:
     return Path(series_dir) / "episodes" / f"{n:02d}"
+
+
+def stale_reason(series_dir: Path, plan: dict, ep: dict) -> str:
+    """Why episode ep's script was written for other pages than the plan now says, or "".
+
+    No written.json means a script from before it existed: trusted, never rewritten. The
+    source path is not compared, so a moved book file never makes every episode stale."""
+    path = episode_dir(series_dir, ep["n"]) / "written.json"
+    if not path.exists():
+        return ""
+    unreadable = (
+        "its written.json is unreadable"  # torn or hand-edited: can't vouch for it
+    )
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        unit, start, end = meta["unit"], meta["start"], meta["end"]
+    except (OSError, ValueError, TypeError, KeyError):
+        return unreadable
+    if type(start) is not int or type(end) is not int:
+        return unreadable
+    want = plan["unit"]
+    if unit != want:
+        return f"written from {unit} {start}-{end}, the plan now uses {want}"
+    if (start, end) != (ep["start"], ep["end"]):
+        return f"written for {unit} {start}-{end}, the plan now says {want} {ep['start']}-{ep['end']}"
+    return ""
+
+
+def script_state(series_dir: Path, plan: dict, ep: dict) -> str:
+    """Whether episode ep's script is "missing", "current" or "stale" (written for a range
+    the plan no longer has)."""
+    if not (episode_dir(series_dir, ep["n"]) / "script.txt").exists():
+        return "missing"
+    return "stale" if stale_reason(series_dir, plan, ep) else "current"
 
 
 # --- reading model output ----------------------------------------------------------
@@ -202,12 +237,17 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
     earlier = [e for e in plan["episodes"] if e["n"] < ep["n"]]
     if not earlier:
         return None
-    prev = episode_dir(series_dir, earlier[-1]["n"])
-    if not (prev / "script.txt").exists():
+    n = earlier[-1]["n"]
+    state = script_state(series_dir, plan, earlier[-1])
+    if state == "missing":
         raise WriteError(
-            f"write episode {earlier[-1]['n']} first: episode {ep['n']} continues from its "
-            "summary and puzzle"
+            f"write episode {n} first: episode {ep['n']} continues from its summary and puzzle"
         )
+    if state == "stale":
+        raise WriteError(
+            f"rewrite episode {n} first: its script no longer matches the plan"
+        )
+    prev = episode_dir(series_dir, n)
     summary, puzzle = (
         (prev / f).read_text(encoding="utf-8").strip()
         for f in ("summary.md", "puzzle_answer.md")
@@ -266,6 +306,13 @@ def write_episode(
     save(d / "critique.md", crit_text)
     save(d / "puzzle_answer.md", crit.get("PUZZLE ANSWER") or draft["PUZZLE ANSWER"])
     save(d / "summary.md", draft["EPISODE SUMMARY"])
+    written = {
+        "source": str(src.path.resolve()),
+        "unit": unit,
+        "start": start,
+        "end": end,
+    }
+    save(d / "written.json", json.dumps(written))
     save(d / "script.txt", script)
     words = len(script.split())
     return Written(

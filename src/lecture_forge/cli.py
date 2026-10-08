@@ -11,7 +11,7 @@ from lecture_forge.plan import MAX_MINUTES, PlanError, load_plan, make_plan, wri
 from lecture_forge.providers import ProviderError, complete
 from lecture_forge.source import Source, open_source, outline
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
-from lecture_forge.write import WriteError, episode_dir, write_episode
+from lecture_forge.write import WriteError, script_state, stale_reason, write_episode
 
 SERIES_DIR = Path("series")
 SLUG = re.compile(
@@ -132,14 +132,14 @@ def cmd_write(args: argparse.Namespace) -> None:
         )
     plan = load_plan(plan_path)
 
-    def done(ep: dict) -> bool:
-        return (episode_dir(series_dir, ep["n"]) / "script.txt").exists()
+    def state(ep: dict) -> str:
+        return script_state(series_dir, plan, ep)
 
     if args.episode is not None:
         todo = [e for e in plan["episodes"] if e["n"] == args.episode]
         if not todo:
             raise ValueError(f"the plan has no episode {args.episode}")
-        if done(todo[0]) and not args.force:
+        if state(todo[0]) == "current" and not args.force:
             raise FileExistsError(
                 f"episode {args.episode} is already written; pass --force to rewrite it"
             )
@@ -150,10 +150,14 @@ def cmd_write(args: argparse.Namespace) -> None:
     call = _provider_call(settings, args.auto)
     unit = plan["unit"]
     for ep in todo:
-        rewriting = done(ep)
-        if rewriting and not args.force:
+        now = state(ep)
+        rewriting = now != "missing"
+        if now == "current" and not args.force:
             print(f"Episode {ep['n']}: {ep['title']}: already written, skipping")
             continue
+        if now == "stale":
+            why = stale_reason(series_dir, plan, ep)
+            print(f"Episode {ep['n']}: {ep['title']}: plan changed ({why}), rewriting")
         where = f"{unit} {ep['start']}-{ep['end']}"
         print(
             f"Episode {ep['n']}: {ep['title']} ({where}): drafting, then critiquing...",
@@ -169,7 +173,11 @@ def cmd_write(args: argparse.Namespace) -> None:
             print(
                 f"  note: the writer suggests a split: {w.split} (plan.yaml is unchanged)"
             )
-        later = [str(e["n"]) for e in plan["episodes"] if e["n"] > ep["n"] and done(e)]
+        later = [
+            str(e["n"])
+            for e in plan["episodes"]
+            if e["n"] > ep["n"] and state(e) != "missing"
+        ]
         if rewriting and args.episode is not None and later:
             print(
                 f"  note: episode {', '.join(later)} was written from the old summary and "
@@ -197,12 +205,14 @@ def cmd_render(args: argparse.Namespace) -> None:
         todo = plan["episodes"]
     ready, total = [], 0
     for ep in todo:
-        if not (episode_dir(series_dir, ep["n"]) / "script.txt").exists():
-            if args.episode is not None:
-                raise render.RenderError(
-                    f"write episode {ep['n']} first (lecture-forge write)"
-                )
-            print(f"Episode {ep['n']}: {ep['title']}: not written yet, skipping")
+        state = script_state(series_dir, plan, ep)
+        if state != "current" and args.episode is None:  # one episode: cost() says why
+            why = (
+                "not written yet"
+                if state == "missing"
+                else f"script no longer matches the plan ({stale_reason(series_dir, plan, ep)})"
+            )
+            print(f"Episode {ep['n']}: {ep['title']}: {why}, skipping")
             continue
         chars = render.cost(plan, ep, series_dir, settings, force=args.force)
         print(f"Episode {ep['n']}: {ep['title']}: {chars:,} characters to synthesize")
