@@ -513,7 +513,9 @@ def test_script_written_for_another_range_is_never_rendered(series, tmp_path, be
     with pytest.raises(RenderError, match="no longer matches") as e:
         run(series, tmp_path, tts)
     assert "written for lines 2-2, the plan now says lines 1-1" in str(e.value)
-    assert "lecture-forge write algebra --episode 1 --force" in str(e.value)
+    assert str(e.value).endswith(
+        "lecture-forge write algebra --episode 1"
+    )  # no --force needed
     assert tts.calls == []
 
 

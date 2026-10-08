@@ -210,7 +210,7 @@ def _script(series_dir: Path, plan: dict, ep: dict) -> str:
         raise RenderError(
             f"episode {n}'s script no longer matches the plan "
             f"({stale_reason(series_dir, plan, ep)}); rewrite it: "
-            f"lecture-forge write {Path(series_dir).name} --episode {n} --force"
+            f"lecture-forge write {Path(series_dir).name} --episode {n}"
         )
     return (episode_dir(series_dir, n) / "script.txt").read_text(encoding="utf-8")
 
