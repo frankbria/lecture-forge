@@ -27,3 +27,8 @@ Process and tooling lessons from working on this repo. Code and product follow-u
 - **A demo on the real filesystem type beats a unit test for platform bugs.** The case-only-rename bug only exists on case-insensitive drives. Linux tests can't show it. A scratch folder on `/mnt/c` (the same drvfs type as the Dropbox `D:`) reproduced it with main's code and verified the fix, at zero credits.
 - **Prefer exact checks over heuristics a reviewer can break.** The plan's `casefold()` name compare had false positives (ß/ss) and left duplicates on case-sensitive drives. `os.path.samefile`, verified on the real drive first, is exact.
 
+## 2026-10-07: implementing #26 (PR #38)
+
+- **The `feature-dev:code-reviewer` agent has no shell.** It couldn't run `git diff` or pytest, so it reviewed the post-change files and couldn't confirm which test assertions had changed. Paste the diff into its prompt (as the opencode review does), or use an agent type with Bash.
+- **Demo error-path fixes before and after through the real CLI.** A torn marker, a read-only folder and a stand-in `claude` on PATH reproduced three tracebacks on main at zero cost, and showed the PR's `error:` lines. That is stronger evidence than the unit tests alone.
+
