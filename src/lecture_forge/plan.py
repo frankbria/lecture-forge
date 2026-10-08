@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -161,6 +162,13 @@ def make_plan(src: Source, guide: StyleGuide, start: int, end: int, call: Call) 
     raise PlanError("the planner's plan is still invalid: " + "; ".join(errors))
 
 
+def save(path: Path, text: str) -> None:
+    """Write via a temp file and an atomic rename: a crash never leaves a half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text.strip() + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
 HEADER = """# Episode plan. Edit freely: reorder, merge, split or change ranges, then write scripts.
 # Ranges are inclusive and absolute: source pages for PDFs, lines for text.
 
@@ -197,7 +205,7 @@ def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> P
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)
-    path.write_text(HEADER + body, encoding="utf-8")
+    save(path, HEADER + body)
     return path
 
 
