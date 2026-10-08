@@ -522,19 +522,19 @@ def test_load_plan_rejects_missing_or_odd_source(tmp_path, book, value):
 def test_interrupted_rewrite_never_leaves_a_done_episode_with_mixed_files(
     tmp_path, book, monkeypatch
 ):
-    from lecture_forge import write as write_mod
+    from lecture_forge import plan as plan_mod  # the atomic writer lives in plan.py
 
     replies = iter([draft_reply(summary="OLD SUMMARY"), critique_reply()])
     run(tmp_path, book, lambda s, u, p: next(replies))  # episode 1 done, old continuity
     d = episode_dir(tmp_path / "series" / "algebra", 1)
-    real_replace = write_mod.os.replace
+    real_replace = plan_mod.os.replace
 
     def crash_on_script(src, dst):
         if str(dst).endswith("script.txt"):
             raise KeyboardInterrupt  # power cut just before the episode is marked done
         real_replace(src, dst)
 
-    monkeypatch.setattr(write_mod.os, "replace", crash_on_script)
+    monkeypatch.setattr(plan_mod.os, "replace", crash_on_script)
     replies = iter([draft_reply(summary="NEW SUMMARY"), critique_reply()])
     with pytest.raises(KeyboardInterrupt):
         run(tmp_path, book, lambda s, u, p: next(replies))
@@ -546,12 +546,12 @@ def test_interrupted_rewrite_never_leaves_a_done_episode_with_mixed_files(
 
 
 def test_files_are_published_atomically(tmp_path, book, monkeypatch):
-    from lecture_forge import write as write_mod
+    from lecture_forge import plan as plan_mod  # the atomic writer lives in plan.py
 
     published = []
-    real_replace = write_mod.os.replace
+    real_replace = plan_mod.os.replace
     monkeypatch.setattr(
-        write_mod.os,
+        plan_mod.os,
         "replace",
         lambda s, d: (published.append(Path(d).name), real_replace(s, d)),
     )

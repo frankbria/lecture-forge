@@ -18,6 +18,7 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs.core.api_error import ApiError
 
 from lecture_forge.config import Settings
+from lecture_forge.plan import save
 from lecture_forge.providers import retryable_status
 from lecture_forge.write import episode_dir
 
@@ -222,7 +223,17 @@ def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
         "output": str(out),
     }
     marker = episode_dir(series_dir, ep["n"]) / "render.json"
-    previous = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
+    previous = {}
+    if marker.exists():
+        try:
+            previous = json.loads(marker.read_text(encoding="utf-8"))
+        except (
+            ValueError
+        ):  # bad JSON or not UTF-8 (JSONDecodeError, UnicodeDecodeError)
+            previous = None
+        if not isinstance(previous, dict):  # torn by a crash, or hand-edited
+            log.warning("%s is unreadable; rebuilding from cached pieces", marker)
+            previous = {}
     return script, out, state, previous, out.exists() and previous == state
 
 
@@ -293,7 +304,7 @@ def render_episode(
             audio, request_id = tts(text, context)
             part = mp3.with_suffix(".part")
             part.write_bytes(audio)
-            rid.write_text(request_id, encoding="utf-8")
+            save(rid, request_id)
             os.replace(part, mp3)  # a piece is cached only once it is fully on disk
             billed += len(text)
         fresh = rid.exists() and time.time() - rid.stat().st_mtime < ID_TTL_S
@@ -304,7 +315,7 @@ def render_episode(
         "title": ep["title"], "album": plan["title"], "artist": artist, "album_artist": artist,
         "track": f"{ep['n']}/{max(e['n'] for e in plan['episodes'])}", "genre": "Speech",
     })  # fmt: skip
-    marker.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    save(marker, json.dumps(state, indent=2))
     _remove_replaced(previous.get("output"), out, settings, ep["n"])
     return Rendered(out, billed, reused, False)
 

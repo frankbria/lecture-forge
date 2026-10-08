@@ -1,13 +1,12 @@
 """Write one episode: a script pass (style guide Part 1), then a critique pass (Part 2)."""
 
-import os
 import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from lecture_forge.plan import Call
+from lecture_forge.plan import Call, save
 from lecture_forge.source import extract_text, slice_pdf
 from lecture_forge.style_guide import StyleGuide
 
@@ -216,13 +215,6 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
     return summary, puzzle
 
 
-def _save(path: Path, text: str) -> None:
-    """Write via a temp file and an atomic rename: a crash never leaves a half-written file."""
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text.strip() + "\n", encoding="utf-8")
-    os.replace(tmp, path)
-
-
 def write_episode(
     plan: dict, ep: dict, guide: StyleGuide, call: Call, series_dir: Path
 ) -> Written:
@@ -257,8 +249,8 @@ def write_episode(
             _check_draft,
         )
         d.mkdir(parents=True, exist_ok=True)
-        _save(d / "draft.md", draft_text)  # kept even if the critique fails
-        _save(d / "notes.md", draft.get("PRODUCTION NOTES", ""))
+        save(d / "draft.md", draft_text)  # kept even if the critique fails
+        save(d / "notes.md", draft.get("PRODUCTION NOTES", ""))
         crit_text, crit = _ask(
             call,
             guide.script_prompt + "\n\n" + guide.critique_prompt + CRITIQUE_ADDENDUM,
@@ -271,10 +263,10 @@ def write_episode(
     # A rewrite is "not done" while its files change, so an interrupted rewrite can never
     # leave an old script.txt marking new (mismatched) continuity files as finished.
     (d / "script.txt").unlink(missing_ok=True)
-    _save(d / "critique.md", crit_text)
-    _save(d / "puzzle_answer.md", crit.get("PUZZLE ANSWER") or draft["PUZZLE ANSWER"])
-    _save(d / "summary.md", draft["EPISODE SUMMARY"])
-    _save(d / "script.txt", script)
+    save(d / "critique.md", crit_text)
+    save(d / "puzzle_answer.md", crit.get("PUZZLE ANSWER") or draft["PUZZLE ANSWER"])
+    save(d / "summary.md", draft["EPISODE SUMMARY"])
+    save(d / "script.txt", script)
     words = len(script.split())
     return Written(
         d,

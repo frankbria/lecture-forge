@@ -18,3 +18,14 @@ def test_outline_without_headings_says_so(tmp_path, capsys):
 def test_bad_source_returns_error_code(tmp_path, capsys):
     assert main(["outline", str(tmp_path / "x.pdf")]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_os_errors_print_as_error_lines(monkeypatch, capsys):
+    from lecture_forge import cli
+
+    def locked(args):
+        raise PermissionError("locked by Dropbox")
+
+    monkeypatch.setattr(cli, "cmd_outline", locked)
+    assert main(["outline", "x.pdf"]) == 1
+    assert "error: locked by Dropbox" in capsys.readouterr().err

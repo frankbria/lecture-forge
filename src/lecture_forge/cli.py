@@ -334,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args.func(args)
     except (
-        FileNotFoundError, FileExistsError, ValueError,
+        OSError, ValueError,  # OSError: also a Dropbox-locked file, a full disk
         ConfigError, StyleGuideError, ProviderError, PlanError, WriteError, render.RenderError,
     ) as e:  # fmt: skip
         print(f"error: {e}", file=sys.stderr)

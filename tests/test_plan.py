@@ -368,3 +368,21 @@ def test_plan_summary_says_1_episode_not_1_episodes(project, book, monkeypatch, 
     monkeypatch.setitem(providers.PROVIDERS, "anthropic", lambda s, u, p, st: reply)
     assert main(["plan", str(book.path), "--series", "algebra", "--auto"]) == 0
     assert "1 episode, ~25 min total" in capsys.readouterr().out
+
+
+def test_plan_yaml_is_replaced_atomically(tmp_path, book, monkeypatch):
+    """A crash while saving must leave the owner's edited plan intact, not half-written."""
+    from lecture_forge import plan as plan_mod
+
+    out = tmp_path / "plan.yaml"
+    write_plan({"title": "A", "author": "", "episodes": [episode(1, 3)]}, book, out)
+    before = out.read_bytes()
+
+    def crash(src, dst):
+        raise KeyboardInterrupt  # power cut at the rename
+
+    monkeypatch.setattr(plan_mod.os, "replace", crash)
+    new = {"title": "B", "author": "", "episodes": [episode(4, 6)]}
+    with pytest.raises(KeyboardInterrupt):
+        write_plan(new, book, out, force=True)
+    assert out.read_bytes() == before
