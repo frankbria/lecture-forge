@@ -317,9 +317,7 @@ def _remove_replaced(old: str | None, new: Path, settings: Settings, n: int) -> 
         return
     old_path = Path(old)
     # On a case-insensitive drive (Dropbox on D:) a case-only rename is the same file.
-    if str(old_path).casefold() == str(new).casefold() or (
-        old_path.exists() and new.exists() and os.path.samefile(old_path, new)
-    ):
+    if old_path.exists() and new.exists() and os.path.samefile(old_path, new):
         return
     base = settings.output_dir.resolve()
     if (
