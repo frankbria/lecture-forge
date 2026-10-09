@@ -235,7 +235,7 @@ def cmd_render(args: argparse.Namespace) -> None:
             f"~{estimate:,} credits ({total:,} characters at {rate:.2f}/char, measured)"
         )
     else:
-        cost = f"{total:,} characters (≈ credits; no render measured yet for {settings.model_id})"
+        cost = f"{total:,} characters (about as many credits; no render measured yet for {settings.model_id})"
     print(f"Total: {cost}{balance}")
     if left is not None and estimate > left:
         raise render.RenderError(
