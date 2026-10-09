@@ -60,10 +60,14 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
             ]
     lines = _read(src.path).splitlines()
     start = 0
-    # YAML front matter: its closing --- underlines nothing
+    # YAML front matter: its closing --- underlines nothing. It has no blank lines, so a
+    # blank before the closer means the first --- was a rule.
     if len(lines) > 1 and lines[0].strip() == "---" and YAML_KEY.match(lines[1]):
-        ends = (i for i in range(1, len(lines)) if lines[i].strip() in ("---", "..."))
-        start = next(ends, -1) + 1
+        stops = (
+            i for i in range(1, len(lines)) if lines[i].strip() in ("", "---", "...")
+        )
+        end = next(stops, 0)
+        start = end + 1 if end and lines[end].strip() else 0
     # text: (line, title) of the line an underline below it would make a heading
     entries, fence, text = [], "", None
     for n, line in enumerate(lines[start:], start + 1):

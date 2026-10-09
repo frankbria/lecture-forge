@@ -192,3 +192,8 @@ def test_front_matter_after_a_byte_order_mark_is_still_skipped(tmp_path):
 )  # fmt: skip
 def test_a_rule_under_a_list_quote_table_or_indented_line_is_no_heading(tmp_path, line):
     assert md_outline(tmp_path, f"{line}\n---\n{line}\n===\n") == []
+
+
+def test_front_matter_ends_before_its_first_blank_line(tmp_path):
+    text = "---\nDate: 2026-10-08\n\nGroups\n======\n\nbody\n\n---\n\nRings\n======\n"
+    assert md_outline(tmp_path, text) == [(1, "Groups", 4), (1, "Rings", 11)]
