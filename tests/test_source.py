@@ -11,15 +11,16 @@ from lecture_forge.source import (
 
 
 def scanned_pdf(path, pages):
-    """One page per letter: t has text, s is a scan (an image, no text layer), b is blank."""
+    """One page per letter: t has text, f text and a figure, s is a scan (an image, no
+    text layer), b is blank."""
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
     pix.clear_with(200)
     doc = pymupdf.open()
     for kind in pages:
         page = doc.new_page()
-        if kind == "t":
+        if kind in "tf":
             page.insert_text((72, 72), "Some words here")
-        elif kind == "s":
+        if kind in "fs":
             page.insert_image(pymupdf.Rect(72, 72, 300, 300), stream=pix.tobytes("png"))
     doc.save(path)
     return path
@@ -225,8 +226,8 @@ def test_an_underline_indented_four_spaces_continues_the_paragraph(tmp_path):
 
 
 def test_scanned_pages_are_images_without_a_text_layer(tmp_path):
-    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbs"))
-    assert scanned_pages(src) == [2, 4]  # the blank page 3 is no scan
+    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbsf"))
+    assert scanned_pages(src) == [2, 4]  # blank page 3 and figure page 5 are no scans
     assert scanned_pages(src, 3, 4) == [4]
     assert extract_text(src, 2, 2).strip() == ""  # what the planner can't count
 
