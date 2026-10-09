@@ -56,8 +56,9 @@ def draft_reply(
     )
 
 
-def critique_reply(script=SCRIPT, puzzle=None):
-    tail = f"\n\n## PUZZLE ANSWER\n{puzzle}\n" if puzzle else "\n"
+def critique_reply(script=SCRIPT, puzzle=None, summary=None):
+    tail = f"\n\n## PUZZLE ANSWER\n{puzzle}\n" if puzzle is not None else "\n"
+    tail += f"\n## EPISODE SUMMARY\n{summary}\n" if summary is not None else ""
     return (
         "1. **Visual dependencies:** none.\n2. **Mathematical or factual errors:** none.\n"
         "3. **Working-memory overload:** fine.\n4. **Tone violations:** none.\n"
@@ -296,6 +297,100 @@ def test_critique_can_replace_the_puzzle(tmp_path, book):
     assert (d / "puzzle_answer.md").read_text(
         encoding="utf-8"
     ).strip() == "NEW PUZZLE + ANSWER"
+
+
+def test_critique_can_replace_the_summary_the_next_episode_recaps(tmp_path, book):
+    revised = "We met cosets; the Lagrange section was cut."
+    replies = iter([draft_reply(summary="OLD"), critique_reply(summary=revised)])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == revised
+    assert "Lagrange" not in (d / "script.txt").read_text(encoding="utf-8")
+    replies, prompts = iter([draft_reply(), critique_reply()]), []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call, n=2)
+    assert revised in prompts[0]  # episode 2's "last time" recap
+
+
+def test_without_a_revised_summary_the_drafts_is_kept(tmp_path, book):
+    replies = iter([draft_reply(summary="We met cosets."), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == "We met cosets."
+
+
+def test_an_episode_summary_line_in_the_critique_is_no_heading(tmp_path, book):
+    """Commentary or a spoken line starting "Episode summary:" mustn't replace summary.md
+    or cut the revised script short: the restated summary is a heading on its own line."""
+    spoken = f"{SCRIPT}\nEpisode summary: we covered cosets.\nAnd one more spoken line."
+    crit = critique_reply(script=spoken).replace(
+        "2. **Mathematical",
+        "Episode summary: mentions Lagrange, which is cut.\n"
+        "- **Episode summary:** still says Lagrange.\n2. **Mathematical",
+    )
+    replies = iter([draft_reply(summary="We met cosets."), crit])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == "We met cosets."
+    assert (
+        (d / "script.txt")
+        .read_text(encoding="utf-8")
+        .rstrip()
+        .endswith("one more spoken line.")
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["EPISODE SUMMARY: {}", "## EPISODE SUMMARY: {}", "**EPISODE SUMMARY:** {}",
+     "## Episode Summary: {}"],
+)  # fmt: skip
+def test_a_restated_summary_marked_as_a_heading_may_be_inline(tmp_path, book, line):
+    """Capitals as asked, or a # heading: never left in the spoken script."""
+    revised = "We met cosets; Lagrange was cut."
+    crit = critique_reply() + "\n" + line.format(revised) + "\n"
+    replies = iter([draft_reply(summary="OLD"), crit])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == revised
+    assert "Lagrange" not in (d / "script.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("section", ["summary", "puzzle"])
+def test_an_empty_restated_section_gets_one_repair_round(tmp_path, book, section):
+    empty, fixed = {section: ""}, {section: "Restated after the revision."}
+    replies = iter([draft_reply(), critique_reply(**empty), critique_reply(**fixed)])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    name = "EPISODE SUMMARY" if section == "summary" else "PUZZLE ANSWER"
+    assert len(prompts) == 3 and f"the {name} section is empty" in prompts[2]
+    f = "summary.md" if section == "summary" else "puzzle_answer.md"
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / f).read_text(encoding="utf-8").strip() == "Restated after the revision."
+
+
+def test_critique_sees_the_drafts_summary_and_when_to_restate_it(tmp_path, book):
+    replies, calls = iter([draft_reply(summary="We met cosets."), critique_reply()]), []
+
+    def call(system, user, pdf):
+        calls.append((system, user))
+        return next(replies)
+
+    run(tmp_path, book, call)
+    system, user = calls[1]
+    assert (
+        "EPISODE SUMMARY" in system and "changes what the episode establishes" in system
+    )
+    assert "We met cosets." in user.split("SCRIPT TO REVIEW", 1)[1]
 
 
 def test_draft_missing_sections_gets_one_repair_round(tmp_path, book):
@@ -675,3 +770,15 @@ def test_written_json_that_cannot_be_read_is_stale(tmp_path, book):
     (d / "script.txt").write_text("words\n", encoding="utf-8")
     assert script_state(sdir, plan, ep) == "stale"
     assert stale_reason(sdir, plan, ep) == "its written.json is unreadable"
+
+
+def test_critique_without_a_revised_script_gets_one_repair_round(tmp_path, book):
+    replies = iter([draft_reply(), "1. Visual dependencies: none.", critique_reply()])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert "the Revised script section is missing or empty" in prompts[2]
