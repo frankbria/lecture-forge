@@ -313,9 +313,8 @@ def write_episode(
             pdf,
             CRITIQUE_SECTIONS,
             lambda found: _check_critique(found, draft["SCRIPT"]),
-            own_line=(
-                "EPISODE SUMMARY",
-            ),  # "Episode summary: ..." in prose is no heading
+            # "Episode summary: ..." in commentary or the spoken text is no heading
+            own_line=("EPISODE SUMMARY",),
         )
     script = _spoken(crit["Revised script"])
     # A rewrite is "not done" while its files change, so an interrupted rewrite can never
