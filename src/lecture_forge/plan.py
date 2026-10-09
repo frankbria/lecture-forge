@@ -63,7 +63,7 @@ def source_digest(src: Source, start: int, end: int) -> str:
     scanned = set(scanned_pages(src, start, end))  # 0 words would mislead the planner
     # ponytail: reopens the PDF per page; fine for books, batch it if planning gets slow
     return "".join(
-        f"page {n}: scanned, no text layer\n"
+        f"page {n}: scanned page image, words not counted\n"
         if n in scanned
         else f"page {n}: {len(extract_text(src, n, n).split())} words\n"
         for n in range(start, end + 1)

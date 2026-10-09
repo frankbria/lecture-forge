@@ -107,24 +107,31 @@ def extract_text(src: Source, start: int = 1, end: int | None = None) -> str:
     if src.kind == "text":
         lines = _read(src.path).splitlines(keepends=True)
         return "".join(lines[start - 1 : end])
-    # The text layer only: a scanned page comes back empty (see scanned_pages).
+    # The text layer only: a scanned page comes back (nearly) empty (see scanned_pages).
     with pymupdf.open(src.path) as doc:
         return "\n".join(doc[i].get_text() for i in range(start - 1, end))
 
 
+def _is_scan(page: pymupdf.Page) -> bool:
+    """An image over most of the page, with at most a stamped page number as text."""
+    # ponytail: fixed thresholds; a full-page figure with a 3-word caption counts too
+    if len(page.get_text().split()) > 3:
+        return False
+    covered = sum(
+        abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()
+    )
+    return covered >= 0.5 * abs(page.rect)
+
+
 def scanned_pages(src: Source, start: int = 1, end: int | None = None) -> list[int]:
-    """PDF pages that are images with no text layer. Nothing is OCR'd: every provider
-    is sent the pages themselves and reads them as images."""
+    """PDF pages that are scans, whose words the text layer doesn't hold. Nothing is
+    OCR'd: every provider is sent the pages themselves and reads them as images."""
     if src.kind != "pdf":
         return []
     end = src.length if end is None else end
     _check_range(src, start, end)
     with pymupdf.open(src.path) as doc:
-        return [
-            n
-            for n in range(start, end + 1)
-            if not doc[n - 1].get_text().strip() and doc[n - 1].get_images()
-        ]
+        return [n for n in range(start, end + 1) if _is_scan(doc[n - 1])]
 
 
 def scanned_note(src: Source, start: int = 1, end: int | None = None) -> str | None:
@@ -133,8 +140,8 @@ def scanned_note(src: Source, start: int = 1, end: int | None = None) -> str | N
     if not (scanned := scanned_pages(src, start, end)):
         return None
     return (
-        f"note: {len(scanned)} of {end - start + 1} pages have no text layer (scanned). "
-        "The LLM reads them as page images; nothing is OCR'd."
+        f"note: {len(scanned)} of {end - start + 1} pages are scans (page images). "
+        "The LLM reads them as images; nothing is OCR'd."
     )
 
 

@@ -74,7 +74,7 @@ def test_pdf_digest_lists_absolute_page_word_counts(book):
 def test_pdf_digest_marks_scanned_pages_instead_of_counting_zero_words(tmp_path):
     src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsb"))
     assert source_digest(src, 1, 3) == (
-        "page 1: 3 words\npage 2: scanned, no text layer\npage 3: 0 words\n"
+        "page 1: 3 words\npage 2: scanned page image, words not counted\npage 3: 0 words\n"
     )
 
 
@@ -410,5 +410,5 @@ def test_plan_command_notes_scanned_pages_in_its_range(
     args = ["plan", str(scan), "--series", "s", "--range", "2-4", "--auto"]
     assert main(args) == 0
     out = capsys.readouterr().out
-    assert "note: 2 of 3 pages have no text layer (scanned)" in out
-    assert "page 3: scanned, no text layer" in prompts[0]
+    assert "note: 2 of 3 pages are scans (page images)" in out
+    assert "page 3: scanned page image, words not counted" in prompts[0]

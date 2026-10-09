@@ -36,7 +36,7 @@ def test_os_errors_print_as_error_lines(monkeypatch, capsys):
 def test_outline_notes_scanned_pages(tmp_path, capsys):
     assert main(["outline", str(scanned_pdf(tmp_path / "scan.pdf", "tssb"))]) == 0
     out = capsys.readouterr().out
-    assert "note: 2 of 4 pages have no text layer (scanned)" in out
+    assert "note: 2 of 4 pages are scans (page images)" in out
     assert "nothing is OCR'd" in out
     main(["outline", str(scanned_pdf(tmp_path / "text.pdf", "tb"))])
     assert "note:" not in capsys.readouterr().out
