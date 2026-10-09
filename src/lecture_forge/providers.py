@@ -73,7 +73,7 @@ def check_pdf(name: str, pdf: Path, system: str, user: str, model: str = "") -> 
     request = 4 * -(-size // 3) + len(system.encode()) + len(user.encode())  # base64
     found = f"{pages} page{'s' * (pages != 1)}, {size / 10**6:.1f} MB"
     if name == "anthropic" and pages > max_pdf_pages(model):
-        why = f"{pages} pages; {model} takes at most {max_pdf_pages(model)}"
+        why = f"{model} takes at most {max_pdf_pages(model)} pages"
     elif request > MAX_REQUEST_BYTES.get(name, request):
         found += f", {request / 10**6:.1f} MB once base64-encoded"
         why = f"{name} takes at most {MAX_REQUEST_BYTES[name] // 10**6} MB per request"

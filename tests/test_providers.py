@@ -433,7 +433,12 @@ KEYS = {"anthropic_api_key": "sk-ant-fake", "openai_api_key": "sk-fake"}
 @pytest.mark.parametrize(
     "name,pages,padding,why",
     [
-        ("anthropic", 601, 0, "601 pages; claude-opus-5-5 takes at most 600"),
+        (
+            "anthropic",
+            601,
+            0,
+            "601 pages, 0.0 MB): claude-opus-5-5 takes at most 600 pages",
+        ),
         ("anthropic", 1, 24_000_000, "anthropic takes at most 32 MB per request"),
         ("openai", 1, 50_000_000, "openai takes at most 50 MB per PDF"),
     ],
@@ -463,7 +468,8 @@ def test_a_200k_context_claude_model_takes_at_most_100_pages(tmp_path, no_upload
     pdf = big_pdf(tmp_path / "source.pdf", 101)
     s = settings(**KEYS, llm_model="claude-haiku-4-5")
     with pytest.raises(
-        ProviderError, match="101 pages; claude-haiku-4-5 takes at most 100"
+        ProviderError,
+        match=r"101 pages, 0.0 MB\): claude-haiku-4-5 takes at most 100 pages",
     ):
         complete("anthropic", "s", "u", pdf, settings=s, sleep=pytest.fail)
 
@@ -502,3 +508,12 @@ def test_plan_of_a_book_over_the_limit_suggests_a_range(
     book = big_pdf(tmp_path / "book.pdf", 650)
     assert main(["plan", str(book), "--series", "s", "--auto"]) == 1
     assert "650 pages" in (err := capsys.readouterr().err) and "--range" in err
+
+
+def test_claude_code_takes_a_pdf_over_the_api_limits(fake_claude, tmp_path):
+    """It reads the pages as it goes: the API limits are what it's suggested for."""
+    reply, call = fake_claude
+    reply({"is_error": False, "result": "ok"})
+    pdf = big_pdf(tmp_path / "book.pdf", 650)
+    assert complete("claude-code", "s", "u", pdf, settings=settings()) == "ok"
+    assert call()["files"]  # the PDF was handed over
