@@ -12,7 +12,7 @@ HEADING = re.compile(
     r"^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$"
 )  # closing #s need a space before them
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
-SETEXT = re.compile(r"^\s*(=+|-+)\s*$")  # underlines the text line above it
+SETEXT = re.compile(r"^ {0,3}(=+|-+)\s*$")  # underlines the text line above it
 # Lines a rule below can't make a heading: list items, quotes, tables, HTML, indented.
 NOT_TEXT = re.compile(r"\s|[>|<]|[-+*]\s|\d+[.)]\s")
 YAML_KEY = re.compile(r"[\w-]+\s*:")

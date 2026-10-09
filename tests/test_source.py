@@ -197,3 +197,7 @@ def test_a_rule_under_a_list_quote_table_or_indented_line_is_no_heading(tmp_path
 def test_front_matter_ends_before_its_first_blank_line(tmp_path):
     text = "---\nDate: 2026-10-08\n\nGroups\n======\n\nbody\n\n---\n\nRings\n======\n"
     assert md_outline(tmp_path, text) == [(1, "Groups", 4), (1, "Rings", 11)]
+
+
+def test_an_underline_indented_four_spaces_continues_the_paragraph(tmp_path):
+    assert md_outline(tmp_path, "Para\n    ===\nPara\n    ---\n") == []
