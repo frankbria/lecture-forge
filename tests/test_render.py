@@ -399,6 +399,7 @@ def test_render_yes_runs_unattended_and_reports_paths(project, capsys):
     assert main(["render", "algebra", "--episode", "2", "--yes"]) == 0
     out = capsys.readouterr().out
     assert "02 - Rings-Ideals.mp3" in out and tts.calls
+    assert "pieces reused)" in out  # the balance didn't move: no credits claimed
 
 
 def test_render_more_than_left_on_plan_is_refused(project, capsys, monkeypatch):
@@ -569,13 +570,14 @@ def test_render_records_the_credits_it_used_and_a_skip_reads_no_balance(
     )  # the measurement doesn't spoil the up-to-date check
 
 
+# lagging, topped up, unreadable after, unreadable before
 @pytest.mark.parametrize(
-    "after", [10000, 10200, None]
-)  # lagging, topped up, unreadable
+    "before,after", [(10000, 10000), (10000, 10200), (10000, None), (None, 9000)]
+)
 def test_a_balance_that_did_not_drop_records_no_measurement(
-    series, tmp_path, beep, after
+    series, tmp_path, beep, before, after
 ):
-    result = run(series, tmp_path, FakeTTS(beep), balance=readings(10000, after)[1])
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(before, after)[1])
     assert result.credits is None and "credits_used" not in marker(series)
 
 
@@ -598,6 +600,20 @@ def test_a_rebuild_keeps_the_measurement_of_the_same_model(series, tmp_path, bee
     assert "credits_used" not in marker(series)  # never credited to another model
 
 
+def test_an_edit_adds_its_measurement_to_the_episodes_earlier_one(
+    series, tmp_path, beep
+):
+    first = run(series, tmp_path, FakeTTS(beep), balance=readings(10000, 9560)[1])
+    script = episode_dir(series, 1) / "script.txt"
+    script.write_text(
+        script.read_text(encoding="utf-8") + "\nOne more.\n", encoding="utf-8"
+    )
+    edit = run(series, tmp_path, FakeTTS(beep), balance=readings(9560, 9550)[1])
+    assert edit.credits == 10  # this run's own cost
+    m = marker(series)  # the big sample isn't replaced by the small one
+    assert m["chars_sent"] == first.billed + edit.billed and m["credits_used"] == 450
+
+
 def test_credit_rate_is_measured_per_series_and_model(tmp_path):
     def mark(n, text):
         d = episode_dir(tmp_path, n)
@@ -612,6 +628,8 @@ def test_credit_rate_is_measured_per_series_and_model(tmp_path):
     mark(3, json.dumps({"model": "eleven_v3"}))  # rendered, never measured
     mark(4, '{"model": "eleven_v3", "chars_')  # torn
     mark(5, json.dumps({"model": "eleven_v4", "chars_sent": 10, "credits_used": 10}))
+    mark(6, json.dumps({"model": "eleven_v3", "chars_sent": 9, "credits_used": -99}))
+    mark(7, json.dumps({"model": "eleven_v3", "chars_sent": True, "credits_used": 1}))
     assert r.credit_rate(tmp_path, "eleven_v3") == pytest.approx(0.44)
     assert r.credit_rate(tmp_path, "eleven_multilingual_v2") is None
 
@@ -647,3 +665,14 @@ def test_render_preview_and_refusal_use_the_measured_rate(
         assert (
             f"about {c2:,} credits" in err and f"only {left:,} characters left" in err
         )
+
+
+def test_render_all_measures_each_episode_between_its_own_balance_reads(
+    project, monkeypatch
+):
+    root, _ = project
+    vals = iter([100000, 100000, 99000, 99000, 98500])  # preview, then per episode
+    monkeypatch.setattr(r, "characters_left", lambda s: next(vals))
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    sdir = root / "series" / "algebra"
+    assert [marker(sdir, n)["credits_used"] for n in (1, 2)] == [1000, 500]

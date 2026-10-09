@@ -246,6 +246,13 @@ def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
     return script, out, state, previous, up_to_date
 
 
+def _measured(marker) -> tuple[int, int]:
+    """(characters sent, credits used) recorded in a render.json, or (0, 0)."""
+    vals = [marker.get(k) for k in MEASURED] if isinstance(marker, dict) else []
+    ok = len(vals) == 2 and all(type(v) is int and v > 0 for v in vals)
+    return (vals[0], vals[1]) if ok else (0, 0)
+
+
 def credit_rate(series_dir: Path, model: str) -> float | None:
     """Credits per character sent, measured over this series' earlier renders of `model`."""
     chars = credits = 0
@@ -254,12 +261,9 @@ def credit_rate(series_dir: Path, model: str) -> float | None:
             m = json.loads(marker.read_text(encoding="utf-8"))
         except ValueError:  # torn: _target warns when that episode renders
             continue
-        if (
-            isinstance(m, dict)
-            and m.get("model") == model
-            and all(isinstance(m.get(k), int) for k in MEASURED)
-        ):
-            chars, credits = chars + m["chars_sent"], credits + m["credits_used"]
+        if isinstance(m, dict) and m.get("model") == model:
+            c, k = _measured(m)
+            chars, credits = chars + c, credits + k
     return credits / chars if chars > 0 else None
 
 
@@ -344,10 +348,15 @@ def render_episode(
     after = balance() if balance and billed else None
     # Counts can lag, or be topped up mid-render: only a drop is a cost.
     credits = before - after if before is not None and after is not None else 0
+    # Add to the episode's earlier measurement of this model: a small edit's sample
+    # mustn't replace a whole episode's, and a rebuild that sends nothing keeps it.
+    sent, used = (
+        _measured(previous) if previous.get("model") == state["model"] else (0, 0)
+    )
     if credits > 0:
-        state |= {"chars_sent": billed, "credits_used": credits}
-    elif previous.get("model") == state["model"]:  # nothing measured: keep the last one
-        state |= {k: previous[k] for k in MEASURED if k in previous}
+        sent, used = sent + billed, used + credits
+    if used:
+        state |= dict(zip(MEASURED, (sent, used)))
     artist = plan["author"] or "lecture-forge"
     _join(files, out, {
         "title": ep["title"], "album": plan["title"], "artist": artist, "album_artist": artist,
