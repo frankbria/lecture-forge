@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import anthropic
 import openai
+import pymupdf
 
 from lecture_forge.config import Settings
 
@@ -27,6 +29,13 @@ DEFAULT_MODELS = {
     "openai": "gpt-5.5",
 }
 TIMEOUT_S = 1800  # a full script plus critique can take many minutes
+# Per-request PDF limits (provider docs): Claude API 600 pages (100 on 200k-context models)
+# and 32 MB per request, base64 included; OpenAI 50 MB per file, no documented page limit.
+CLAUDE_1M = re.compile(
+    r"claude-[a-z]+-(4-[6-9]|[5-9]|\d{2})"
+)  # 4.6 and later: 1M context
+MAX_REQUEST_BYTES = {"anthropic": 32_000_000}
+MAX_PDF_BYTES = {"openai": 50_000_000}
 
 
 class ProviderError(Exception):
@@ -47,6 +56,37 @@ def retryable_status(status: int | None) -> bool:
 def _api_error(provider: str, e: Exception) -> ProviderError:
     return ProviderError(
         provider, str(e), retryable_status(getattr(e, "status_code", None))
+    )
+
+
+def max_pdf_pages(model: str) -> int:
+    """PDF pages per Claude API request: 600 on 1M-context models; 100 on older (200k)
+    ones, and on unknown model names, the safe side."""
+    return 600 if CLAUDE_1M.match(model) else 100
+
+
+def check_pdf(name: str, pdf: Path, system: str, user: str, model: str = "") -> None:
+    """Refuse a PDF over the provider's per-request limits before uploading it."""
+    size = pdf.stat().st_size
+    with pymupdf.open(pdf) as doc:
+        pages = doc.page_count
+    request = 4 * -(-size // 3) + len(system.encode()) + len(user.encode())  # base64
+    found = f"{pages} page{'s' * (pages != 1)}, {size / 10**6:.1f} MB"
+    if name == "anthropic" and pages > max_pdf_pages(model):
+        why = f"{model} takes at most {max_pdf_pages(model)} pages"
+    elif request > MAX_REQUEST_BYTES.get(name, request):
+        found += f", {request / 10**6:.1f} MB once base64-encoded"
+        why = f"{name} takes at most {MAX_REQUEST_BYTES[name] // 10**6} MB per request"
+    elif size > MAX_PDF_BYTES.get(name, size):
+        why = f"{name} takes at most {MAX_PDF_BYTES[name] // 10**6} MB per PDF"
+    else:
+        return
+    raise ProviderError(
+        name,
+        f"the PDF is too large ({found}): {why}. Use a smaller page range: plan one "
+        "chapter at a time with --range (lecture-forge outline lists the chapter pages), "
+        "or split the episode in plan.yaml. Or use the claude-code provider, which reads "
+        "the pages as it goes",
     )
 
 
@@ -118,6 +158,9 @@ def _anthropic(system: str, user: str, pdf: Path | None, settings: Settings) -> 
     name = "anthropic"
     if not settings.anthropic_api_key:
         raise ProviderError(name, "ANTHROPIC_API_KEY is not set")
+    model = settings.llm_model or DEFAULT_MODELS[name]
+    if pdf:
+        check_pdf(name, pdf, system, user, model)
     client = anthropic.Anthropic(
         api_key=settings.anthropic_api_key, max_retries=0, timeout=TIMEOUT_S
     )
@@ -136,7 +179,7 @@ def _anthropic(system: str, user: str, pdf: Path | None, settings: Settings) -> 
     content.append({"type": "text", "text": user})
     try:
         with client.beta.messages.stream(
-            model=settings.llm_model or DEFAULT_MODELS[name],
+            model=model,
             max_tokens=64000,
             system=system,
             messages=[{"role": "user", "content": content}],
@@ -158,6 +201,8 @@ def _openai(system: str, user: str, pdf: Path | None, settings: Settings) -> str
     name = "openai"
     if not settings.openai_api_key:
         raise ProviderError(name, "OPENAI_API_KEY is not set")
+    if pdf:
+        check_pdf(name, pdf, system, user)
     client = openai.OpenAI(
         api_key=settings.openai_api_key, max_retries=0, timeout=TIMEOUT_S
     )
