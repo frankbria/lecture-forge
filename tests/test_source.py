@@ -12,7 +12,8 @@ from lecture_forge.source import (
 
 def scanned_pdf(path, pages):
     """One page per letter: t has text, f text and a figure, s is a scan (a page image,
-    no text layer), n a scan with a stamped page number, b is blank."""
+    no text layer), n a scan with a stamped page number, o an OCR'd scan (a page image
+    under an invisible text layer), b is blank."""
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
     pix.clear_with(200)
     doc = pymupdf.open()
@@ -22,8 +23,10 @@ def scanned_pdf(path, pages):
             page.insert_text((72, 72), "Some words here")
         if kind == "f":
             page.insert_image(pymupdf.Rect(72, 100, 300, 328), pixmap=pix)
-        if kind in "sn":
+        if kind in "sno":
             page.insert_image(page.rect, pixmap=pix)
+        if kind == "o":
+            page.insert_text((72, 72), "Words a scanner recognized", render_mode=3)
         if kind == "n":
             page.insert_text((290, 820), "12")
     doc.save(path)
@@ -230,9 +233,10 @@ def test_an_underline_indented_four_spaces_continues_the_paragraph(tmp_path):
 
 
 def test_scanned_pages_are_page_images_with_at_most_a_stamped_number(tmp_path):
-    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbsfn"))
-    # a blank page and a page with a figure are no scans; a stamped page number is
+    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbsfno"))
+    # blank, figure and OCR'd pages are no scans; one with a stamped page number is
     assert scanned_pages(src) == [2, 4, 6]
+    assert extract_text(src, 7, 7).split() == ["Words", "a", "scanner", "recognized"]
     assert scanned_pages(src, 3, 4) == [4]
     assert extract_text(src, 2, 2).strip() == ""  # what the planner can't count
 
