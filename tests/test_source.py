@@ -162,6 +162,8 @@ def test_tilde_fences_hide_headings_until_the_same_fence_closes_them(tmp_path):
         "````\n# hidden\n```\n````\n# Rings\n"
     )
     assert md_outline(tmp_path, text) == [(1, "Groups", 7), (1, "Rings", 12)]
+    # an underline after a fence underlines the fence, not the text before it
+    assert md_outline(tmp_path, "Intro\n```\ncode\n```\n===\n") == []
 
 
 def test_yaml_front_matter_is_no_heading(tmp_path):
