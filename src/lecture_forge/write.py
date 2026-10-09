@@ -40,12 +40,12 @@ The script under review was written under the script-writing style guide above.
 Output format addendum (from the lecture-forge app): give items 1-6 under their own heading
 lines. Item 6's heading is exactly "Revised script", followed by only the spoken script and
 nothing after it except the optional final sections below, each heading on a line of its
-own: no separator line, no remarks about your process. If your revision changes
+own. No separator line, no remarks about your process. If your revision changes
 the closing puzzle, add a final section headed PUZZLE ANSWER that restates the new puzzle in
 one line and answers it. If your revision changes what the episode establishes (it cuts or
-reframes material the draft's EPISODE SUMMARY mentions), add a final section headed EPISODE
-SUMMARY: one paragraph on what the revised episode establishes. It replaces the draft's
-summary, which recaps this episode at the start of the next one."""
+reframes material the draft's EPISODE SUMMARY mentions), add a final section headed
+EPISODE SUMMARY, in capitals, with one paragraph on what the revised episode establishes.
+It replaces the draft's summary, which recaps this episode at the start of the next one."""
 
 
 class WriteError(Exception):
@@ -114,10 +114,11 @@ def script_state(series_dir: Path, plan: dict, ep: dict) -> str:
 _LEAD = re.compile(r"^[\s#>]*(?:\d+[.)]\s*)?")
 
 
-def _heading(line: str, names: list[str], own_line=()) -> tuple[str, str] | None:
+def _heading(line: str, names: list[str], strict=()) -> tuple[str, str] | None:
     """(name, inline text) if the line is one of the section headings, in any common style:
     **SCRIPT**, ## SCRIPT, SCRIPT:, 6. **Revised script:** text, SCRIPT (spoken text only).
-    A name in `own_line` counts only as a heading with no text after it."""
+    A name in `strict` takes text after it only on a line marked as a heading, written in
+    capitals as given or as a # heading, so "Episode summary: ..." in prose is no heading."""
     s = _LEAD.sub("", line.replace("*", "")).strip()
     for name in sorted(names, key=len, reverse=True):
         if not s.lower().startswith(name.lower()):
@@ -125,17 +126,20 @@ def _heading(line: str, names: list[str], own_line=()) -> tuple[str, str] | None
         rest = re.sub(r"^\s*\([^)]*\)", "", s[len(name) :]).strip()
         if not rest:
             return name, ""
-        if rest.startswith(":") and not (name in own_line and rest[1:].strip()):
+        marked = s.startswith(name) or line.lstrip().startswith("#")
+        if rest.startswith(":") and (
+            name not in strict or not rest[1:].strip() or marked
+        ):
             return name, rest[1:].strip()
     return None
 
 
-def sections(text: str, names: list[str], own_line=()) -> dict[str, str]:
+def sections(text: str, names: list[str], strict=()) -> dict[str, str]:
     """Split a reply into its named sections; text before the first heading is dropped."""
     out: dict[str, str] = {}
     current, buf = None, []
     for line in text.splitlines():
-        if hit := _heading(line, names, own_line):
+        if hit := _heading(line, names, strict):
             if current:
                 out[current] = "\n".join(buf).strip()
             current, buf = hit[0], [hit[1]] if hit[1] else []
@@ -179,13 +183,13 @@ def fill_template(template: str, **values: str) -> str:
 
 def _ask(
     call: Call, system: str, user: str, pdf: Path | None, names: list[str],
-    check: Callable[[dict[str, str]], list[str]], own_line=(),
+    check: Callable[[dict[str, str]], list[str]], strict=(),
 ) -> tuple[str, dict[str, str]]:  # fmt: skip
     """One call, checked; one repair round with the problems listed, then WriteError."""
     prompt = user
     for _ in range(2):
         text = call(system, prompt, pdf)
-        found = sections(text, names, own_line)
+        found = sections(text, names, strict)
         if not (problems := check(found)):
             return text, found
         prompt = (
@@ -314,7 +318,7 @@ def write_episode(
             CRITIQUE_SECTIONS,
             lambda found: _check_critique(found, draft["SCRIPT"]),
             # "Episode summary: ..." in commentary or the spoken text is no heading
-            own_line=("EPISODE SUMMARY",),
+            strict=("EPISODE SUMMARY",),
         )
     script = _spoken(crit["Revised script"])
     # A rewrite is "not done" while its files change, so an interrupted rewrite can never

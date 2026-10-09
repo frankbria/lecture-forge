@@ -329,7 +329,8 @@ def test_an_episode_summary_line_in_the_critique_is_no_heading(tmp_path, book):
     spoken = f"{SCRIPT}\nEpisode summary: we covered cosets.\nAnd one more spoken line."
     crit = critique_reply(script=spoken).replace(
         "2. **Mathematical",
-        "Episode summary: mentions Lagrange, which is cut.\n2. **Mathematical",
+        "Episode summary: mentions Lagrange, which is cut.\n"
+        "- **Episode summary:** still says Lagrange.\n2. **Mathematical",
     )
     replies = iter([draft_reply(summary="We met cosets."), crit])
     run(tmp_path, book, lambda s, u, p: next(replies))
@@ -341,6 +342,22 @@ def test_an_episode_summary_line_in_the_critique_is_no_heading(tmp_path, book):
         .rstrip()
         .endswith("one more spoken line.")
     )
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["EPISODE SUMMARY: {}", "## EPISODE SUMMARY: {}", "**EPISODE SUMMARY:** {}",
+     "## Episode Summary: {}"],
+)  # fmt: skip
+def test_a_restated_summary_marked_as_a_heading_may_be_inline(tmp_path, book, line):
+    """Capitals as asked, or a # heading: never left in the spoken script."""
+    revised = "We met cosets; Lagrange was cut."
+    crit = critique_reply() + "\n" + line.format(revised) + "\n"
+    replies = iter([draft_reply(summary="OLD"), crit])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == revised
+    assert "Lagrange" not in (d / "script.txt").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("section", ["summary", "puzzle"])
@@ -753,3 +770,15 @@ def test_written_json_that_cannot_be_read_is_stale(tmp_path, book):
     (d / "script.txt").write_text("words\n", encoding="utf-8")
     assert script_state(sdir, plan, ep) == "stale"
     assert stale_reason(sdir, plan, ep) == "its written.json is unreadable"
+
+
+def test_critique_without_a_revised_script_gets_one_repair_round(tmp_path, book):
+    replies = iter([draft_reply(), "1. Visual dependencies: none.", critique_reply()])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert "the Revised script section is missing or empty" in prompts[2]
