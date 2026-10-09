@@ -11,6 +11,9 @@ TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 HEADING = re.compile(
     r"^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$"
 )  # closing #s need a space before them
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+SETEXT = re.compile(r"^\s*(=+|-+)\s*$")  # underlines the text line above it
+RULE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")  # ---, ***, _ _ _: a thematic break
 
 
 @dataclass(frozen=True)
@@ -52,12 +55,32 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
             return [
                 (lvl, title, page) for lvl, title, page in doc.get_toc() if page >= 1
             ]
-    entries, in_fence = [], False
-    for n, line in enumerate(_read(src.path).splitlines(), 1):
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-        elif not in_fence and (m := HEADING.match(line)):
+    lines = _read(src.path).splitlines()
+    start = 0
+    # YAML front matter: its closing --- underlines nothing
+    if lines and lines[0].strip() == "---":
+        ends = (i for i in range(1, len(lines)) if lines[i].strip() in ("---", "..."))
+        start = next(ends, -1) + 1
+    # text: (line, title) of the line an underline below it would make a heading
+    entries, fence, text = [], "", None
+    for n, line in enumerate(lines[start:], start + 1):
+        s = line.strip()
+        # A fence closes only on the same character, at least as long, nothing after.
+        if fence:
+            fence = "" if s.startswith(fence) and set(s) == {fence[0]} else fence
+            continue
+        if m := FENCE.match(line):
+            fence, text = m[1], None
+        elif m := HEADING.match(line):
             entries.append((len(m[1]), m[2], n))
+            text = None
+        elif text and (u := SETEXT.match(line)):
+            entries.append((1 if u[1][0] == "=" else 2, text[1], text[0]))
+            text = None
+        else:  # blank lines and rules are no heading text
+            text = (
+                (n, s) if s and not (RULE.match(line) or SETEXT.match(line)) else None
+            )
     return entries
 
 

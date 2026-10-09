@@ -134,3 +134,38 @@ def test_heading_keeps_hashes_that_belong_to_the_title(tmp_path):
         (2, "F# basics", 2),
         (3, "Closed", 3),
     ]
+
+
+def md_outline(tmp_path, text):
+    p = tmp_path / "n.md"
+    p.write_text(text, encoding="utf-8")
+    return outline(open_source(p))
+
+
+def test_setext_headings_have_their_level_and_text_line(tmp_path):
+    text = "Groups\n======\nintro\n\nCosets  \n---\nbody\n# Rings\n"
+    assert md_outline(tmp_path, text) == [
+        (1, "Groups", 1),
+        (2, "Cosets", 5),
+        (1, "Rings", 8),
+    ]
+
+
+def test_a_rule_under_nothing_or_under_a_heading_is_no_heading(tmp_path):
+    text = "intro\n\n---\n# Groups\n---\n***\n---\n"
+    assert md_outline(tmp_path, text) == [(1, "Groups", 4)]
+
+
+def test_tilde_fences_hide_headings_until_the_same_fence_closes_them(tmp_path):
+    text = (
+        "~~~python\n# not a heading\n```\nNot one\n===\n~~~\n# Groups\n"
+        "````\n# hidden\n```\n````\n# Rings\n"
+    )
+    assert md_outline(tmp_path, text) == [(1, "Groups", 7), (1, "Rings", 12)]
+
+
+def test_yaml_front_matter_is_no_heading(tmp_path):
+    text = "---\ntitle: Algebra notes\ntags: [math]\n---\nGroups\n======\n"
+    assert md_outline(tmp_path, text) == [(1, "Groups", 5)]
+    # a leading rule that never closes is no front matter: nothing is hidden
+    assert md_outline(tmp_path, "---\nGroups\n======\n") == [(1, "Groups", 2)]
