@@ -13,6 +13,9 @@ HEADING = re.compile(
 )  # closing #s need a space before them
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 SETEXT = re.compile(r"^\s*(=+|-+)\s*$")  # underlines the text line above it
+# Lines a rule below can't make a heading: list items, quotes, tables, HTML, indented.
+NOT_TEXT = re.compile(r"\s|[>|<]|[-+*]\s|\d+[.)]\s")
+YAML_KEY = re.compile(r"[\w-]+\s*:")
 RULE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")  # ---, ***, _ _ _: a thematic break
 
 
@@ -24,7 +27,7 @@ class Source:
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig")  # -sig: drop a byte order mark
 
 
 def open_source(path: str | Path) -> Source:
@@ -58,7 +61,7 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
     lines = _read(src.path).splitlines()
     start = 0
     # YAML front matter: its closing --- underlines nothing
-    if lines and lines[0].strip() == "---":
+    if len(lines) > 1 and lines[0].strip() == "---" and YAML_KEY.match(lines[1]):
         ends = (i for i in range(1, len(lines)) if lines[i].strip() in ("---", "..."))
         start = next(ends, -1) + 1
     # text: (line, title) of the line an underline below it would make a heading
@@ -79,7 +82,12 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
             text = None
         else:  # blank lines and rules are no heading text
             text = (
-                (n, s) if s and not (RULE.match(line) or SETEXT.match(line)) else None
+                None
+                if not s
+                or NOT_TEXT.match(line)
+                or RULE.match(line)
+                or SETEXT.match(line)
+                else (n, s)
             )
     return entries
 

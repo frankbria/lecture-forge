@@ -171,3 +171,24 @@ def test_yaml_front_matter_is_no_heading(tmp_path):
     assert md_outline(tmp_path, text) == [(1, "Groups", 5)]
     # a leading rule that never closes is no front matter: nothing is hidden
     assert md_outline(tmp_path, "---\nGroups\n======\n") == [(1, "Groups", 2)]
+
+
+def test_a_note_opening_with_a_rule_is_no_front_matter(tmp_path):
+    assert md_outline(tmp_path, "---\n# One\n\n---\n# Two\n") == [
+        (1, "One", 2),
+        (1, "Two", 5),
+    ]
+
+
+def test_front_matter_after_a_byte_order_mark_is_still_skipped(tmp_path):
+    p = tmp_path / "n.md"
+    p.write_bytes("---\ntitle: x\n---\n# Real\n".encode("utf-8-sig"))
+    assert outline(open_source(p)) == [(1, "Real", 4)]
+
+
+@pytest.mark.parametrize(
+    "line", ["- item one", "* item", "1. first", "2) second", "> quote", "| 1 | 2 |",
+             "    indented code", "  list continuation", "<div>"],
+)  # fmt: skip
+def test_a_rule_under_a_list_quote_table_or_indented_line_is_no_heading(tmp_path, line):
+    assert md_outline(tmp_path, f"{line}\n---\n{line}\n===\n") == []
