@@ -433,7 +433,7 @@ KEYS = {"anthropic_api_key": "sk-ant-fake", "openai_api_key": "sk-fake"}
 @pytest.mark.parametrize(
     "name,pages,padding,why",
     [
-        ("anthropic", 601, 0, "601 pages; anthropic takes at most 600"),
+        ("anthropic", 601, 0, "601 pages; claude-opus-5-5 takes at most 600"),
         ("anthropic", 1, 24_000_000, "anthropic takes at most 32 MB per request"),
         ("openai", 1, 50_000_000, "openai takes at most 50 MB per PDF"),
     ],
@@ -447,11 +447,45 @@ def test_pdf_over_the_providers_limit_fails_before_upload(
     msg = str(info.value)
     assert why in msg and not info.value.retryable
     assert "--range" in msg and "lecture-forge outline" in msg and "claude-code" in msg
+    assert "plan.yaml" in msg  # write: the episode's range comes from the plan
+    assert " 1 pages" not in msg
 
 
-@pytest.mark.parametrize("name", ["anthropic", "openai"])
-def test_pdf_at_the_page_limit_passes_the_check(tmp_path, name):
-    providers.check_pdf(name, big_pdf(tmp_path / "source.pdf", 600), "s", "u")
+def test_request_size_reports_the_base64_size(tmp_path, no_upload):
+    pdf = big_pdf(tmp_path / "source.pdf", 1, 24_000_000)
+    with pytest.raises(ProviderError, match=r"1 page, 24\.0 MB, 32\.0 MB once base64"):
+        complete(
+            "anthropic", "s", "u", pdf, settings=settings(**KEYS), sleep=pytest.fail
+        )
+
+
+def test_a_200k_context_claude_model_takes_at_most_100_pages(tmp_path, no_upload):
+    pdf = big_pdf(tmp_path / "source.pdf", 101)
+    s = settings(**KEYS, llm_model="claude-haiku-4-5")
+    with pytest.raises(
+        ProviderError, match="101 pages; claude-haiku-4-5 takes at most 100"
+    ):
+        complete("anthropic", "s", "u", pdf, settings=s, sleep=pytest.fail)
+
+
+@pytest.mark.parametrize(
+    "model,pages",
+    [("claude-opus-5-5", 600), ("claude-fable-5-1", 600), ("claude-sonnet-4-6", 600),
+     ("claude-haiku-5-5", 600), ("claude-sonnet-4-5", 100), ("claude-haiku-4-5", 100),
+     ("claude-3-7-sonnet-latest", 100)],
+)  # fmt: skip
+def test_page_limit_follows_the_models_context_window(model, pages):
+    assert providers.max_pdf_pages(model) == pages
+
+
+@pytest.mark.parametrize(
+    "name,pages,padding",
+    [("anthropic", 600, 0), ("openai", 600, 0),
+     ("anthropic", 1, 23_900_000), ("openai", 1, 49_900_000)],
+)  # fmt: skip
+def test_pdf_just_within_the_limits_passes_the_check(tmp_path, name, pages, padding):
+    pdf = big_pdf(tmp_path / "source.pdf", pages, padding)
+    providers.check_pdf(name, pdf, "s", "u", "claude-opus-5-5")
 
 
 def test_plan_of_a_book_over_the_limit_suggests_a_range(
