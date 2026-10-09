@@ -204,6 +204,7 @@ def cmd_render(args: argparse.Namespace) -> None:
     else:
         todo = plan["episodes"]
     ready, total = [], 0
+    rate = render.credit_rate(series_dir, settings.model_id)
     for ep in todo:
         state = script_state(series_dir, plan, ep)
         if state != "current" and args.episode is None:  # one episode: cost() says why
@@ -215,15 +216,31 @@ def cmd_render(args: argparse.Namespace) -> None:
             print(f"Episode {ep['n']}: {ep['title']}: {why}, skipping")
             continue
         chars = render.cost(plan, ep, series_dir, settings, force=args.force)
-        print(f"Episode {ep['n']}: {ep['title']}: {chars:,} characters to synthesize")
+        cost = (
+            f"~{round(chars * rate):,} credits ({chars:,} characters)"
+            if rate
+            else f"{chars:,} characters"
+        )
+        print(f"Episode {ep['n']}: {ep['title']}: {cost} to synthesize")
         ready.append(ep)
         total += chars
     left = render.characters_left(settings)
-    balance = f"; {left:,} left on your ElevenLabs plan" if left is not None else ""
-    print(f"Total: {total:,} characters ({settings.model_id}){balance}")
-    if left is not None and total > left:
+    balance = (
+        f"; {left:,} credits left on your ElevenLabs plan" if left is not None else ""
+    )
+    # Nothing measured yet: assume the worst, one credit per character.
+    estimate = round(total * (rate or 1.0))
+    if rate:
+        cost = (
+            f"~{estimate:,} credits ({total:,} characters at {rate:.2f}/char, measured)"
+        )
+    else:
+        cost = f"{total:,} characters (≈ credits; no render measured yet for {settings.model_id})"
+    print(f"Total: {cost}{balance}")
+    if left is not None and estimate > left:
         raise render.RenderError(
-            f"this needs {total:,} characters but your plan has only {left:,} characters left"
+            f"this needs about {estimate:,} credits but your plan has only {left:,} characters "
+            "left (ElevenLabs counts credits as characters)"
         )
     if total and not args.yes:  # spending money always needs a yes
         if not sys.stdin.isatty():
@@ -236,13 +253,15 @@ def cmd_render(args: argparse.Namespace) -> None:
     for ep in ready:
         print(f"Episode {ep['n']}: {ep['title']}: rendering...", flush=True)
         res = render.render_episode(
-            plan, ep, series_dir, settings, tts, force=args.force
-        )
+            plan, ep, series_dir, settings, tts, force=args.force,
+            balance=lambda: render.characters_left(settings),
+        )  # fmt: skip
         if res.skipped:
             print(f"  already rendered: {res.path}")
         else:
+            credits = f", {res.credits:,} credits" if res.credits else ""
             print(
-                f"  -> {res.path}  ({res.billed:,} characters billed, {res.reused} pieces reused)"
+                f"  -> {res.path}  ({res.billed:,} characters sent, {res.reused} pieces reused{credits})"
             )
 
 
