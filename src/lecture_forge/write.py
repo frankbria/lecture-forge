@@ -22,6 +22,7 @@ CRITIQUE_SECTIONS = [
     "TTS hazards",
     "Revised script",
     "PUZZLE ANSWER",
+    "EPISODE SUMMARY",
 ]
 
 # Added at runtime so the user's style guide file is never edited.
@@ -40,7 +41,10 @@ Output format addendum (from the lecture-forge app): give items 1-6 under their 
 lines. Item 6's heading is exactly "Revised script", followed by only the spoken script and
 nothing after it: no separator line, no remarks about your process. If your revision changes
 the closing puzzle, add a final section headed PUZZLE ANSWER that restates the new puzzle in
-one line and answers it."""
+one line and answers it. If your revision changes what the episode establishes (it cuts or
+reframes material the draft's EPISODE SUMMARY mentions), add a final section headed EPISODE
+SUMMARY: one paragraph on what the revised episode establishes. It replaces the draft's
+summary, which recaps this episode at the start of the next one."""
 
 
 class WriteError(Exception):
@@ -294,7 +298,9 @@ def write_episode(
         crit_text, crit = _ask(
             call,
             guide.script_prompt + "\n\n" + guide.critique_prompt + CRITIQUE_ADDENDUM,
-            f"SOURCE MATERIAL:\n{source}\n\nSCRIPT TO REVIEW:\n{_spoken(draft['SCRIPT'])}",
+            f"SOURCE MATERIAL:\n{source}\n\nSCRIPT TO REVIEW:\n{_spoken(draft['SCRIPT'])}"
+            "\n\nTHE DRAFT'S EPISODE SUMMARY (not spoken; recaps this episode in the next "
+            f"one):\n{draft['EPISODE SUMMARY']}",
             pdf,
             CRITIQUE_SECTIONS,
             lambda found: _check_critique(found, draft["SCRIPT"]),
@@ -305,7 +311,7 @@ def write_episode(
     (d / "script.txt").unlink(missing_ok=True)
     save(d / "critique.md", crit_text)
     save(d / "puzzle_answer.md", crit.get("PUZZLE ANSWER") or draft["PUZZLE ANSWER"])
-    save(d / "summary.md", draft["EPISODE SUMMARY"])
+    save(d / "summary.md", crit.get("EPISODE SUMMARY") or draft["EPISODE SUMMARY"])
     written = {
         "source": str(src.path.resolve()),
         "unit": unit,

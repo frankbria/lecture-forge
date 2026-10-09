@@ -56,8 +56,9 @@ def draft_reply(
     )
 
 
-def critique_reply(script=SCRIPT, puzzle=None):
+def critique_reply(script=SCRIPT, puzzle=None, summary=None):
     tail = f"\n\n## PUZZLE ANSWER\n{puzzle}\n" if puzzle else "\n"
+    tail += f"\n## EPISODE SUMMARY\n{summary}\n" if summary else ""
     return (
         "1. **Visual dependencies:** none.\n2. **Mathematical or factual errors:** none.\n"
         "3. **Working-memory overload:** fine.\n4. **Tone violations:** none.\n"
@@ -296,6 +297,45 @@ def test_critique_can_replace_the_puzzle(tmp_path, book):
     assert (d / "puzzle_answer.md").read_text(
         encoding="utf-8"
     ).strip() == "NEW PUZZLE + ANSWER"
+
+
+def test_critique_can_replace_the_summary_the_next_episode_recaps(tmp_path, book):
+    revised = "We met cosets; the Lagrange section was cut."
+    replies = iter([draft_reply(summary="OLD"), critique_reply(summary=revised)])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == revised
+    assert "Lagrange" not in (d / "script.txt").read_text(encoding="utf-8")
+    replies, prompts = iter([draft_reply(), critique_reply()]), []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call, n=2)
+    assert revised in prompts[0]  # episode 2's "last time" recap
+
+
+def test_without_a_revised_summary_the_drafts_is_kept(tmp_path, book):
+    replies = iter([draft_reply(summary="We met cosets."), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    d = episode_dir(tmp_path / "series" / "algebra", 1)
+    assert (d / "summary.md").read_text(encoding="utf-8").strip() == "We met cosets."
+
+
+def test_critique_sees_the_drafts_summary_and_when_to_restate_it(tmp_path, book):
+    replies, calls = iter([draft_reply(summary="We met cosets."), critique_reply()]), []
+
+    def call(system, user, pdf):
+        calls.append((system, user))
+        return next(replies)
+
+    run(tmp_path, book, call)
+    system, user = calls[1]
+    assert (
+        "EPISODE SUMMARY" in system and "changes what the episode establishes" in system
+    )
+    assert "We met cosets." in user.split("SCRIPT TO REVIEW", 1)[1]
 
 
 def test_draft_missing_sections_gets_one_repair_round(tmp_path, book):
