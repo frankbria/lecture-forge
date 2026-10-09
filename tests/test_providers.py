@@ -6,7 +6,7 @@ import pymupdf
 import pytest
 
 from lecture_forge import providers
-from lecture_forge.cli import llm
+from lecture_forge.cli import llm, main
 from lecture_forge.config import Settings, load_settings
 from lecture_forge.providers import ProviderError, complete, subscription_env
 
@@ -404,3 +404,67 @@ def test_unexpected_claude_reply_is_a_provider_error(fake_claude, reply_value):
             "claude-code", "s", "u", settings=settings(),
             sleep=lambda _: pytest.fail("retried"),
         )  # fmt: skip
+
+
+def big_pdf(path, pages=1, padding=0):
+    """A real PDF: `pages` blank pages, plus `padding` random (incompressible) bytes."""
+    doc = pymupdf.open()
+    for _ in range(pages):
+        doc.new_page()
+    if padding:
+        doc.embfile_add("padding.bin", os.urandom(padding))
+    doc.save(path)
+    return path
+
+
+@pytest.fixture
+def no_upload(monkeypatch):
+    """Fails the test if a provider client is built, i.e. if anything would be sent."""
+    for module, cls in (
+        (providers.anthropic, "Anthropic"),
+        (providers.openai, "OpenAI"),
+    ):
+        monkeypatch.setattr(module, cls, lambda **kw: pytest.fail("built a client"))
+
+
+KEYS = {"anthropic_api_key": "sk-ant-fake", "openai_api_key": "sk-fake"}
+
+
+@pytest.mark.parametrize(
+    "name,pages,padding,why",
+    [
+        ("anthropic", 601, 0, "601 pages; anthropic takes at most 600"),
+        ("anthropic", 1, 24_000_000, "anthropic takes at most 32 MB per request"),
+        ("openai", 1, 50_000_000, "openai takes at most 50 MB per PDF"),
+    ],
+)
+def test_pdf_over_the_providers_limit_fails_before_upload(
+    tmp_path, no_upload, name, pages, padding, why
+):
+    pdf = big_pdf(tmp_path / "source.pdf", pages, padding)
+    with pytest.raises(ProviderError) as info:
+        complete(name, "s", "u", pdf, settings=settings(**KEYS), sleep=pytest.fail)
+    msg = str(info.value)
+    assert why in msg and not info.value.retryable
+    assert "--range" in msg and "lecture-forge outline" in msg and "claude-code" in msg
+
+
+@pytest.mark.parametrize("name", ["anthropic", "openai"])
+def test_pdf_at_the_page_limit_passes_the_check(tmp_path, name):
+    providers.check_pdf(name, big_pdf(tmp_path / "source.pdf", 600), "s", "u")
+
+
+def test_plan_of_a_book_over_the_limit_suggests_a_range(
+    tmp_path, no_upload, monkeypatch, capsys
+):
+    guide = tmp_path / "guide.md"
+    guide.write_text(
+        "## Part 1\nS\n## Part 2\nC\n## Part 3\n```\nSOURCE MATERIAL:\n```\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STYLE_GUIDE_PATH", str(guide))
+    monkeypatch.setenv("LECTURE_FORGE_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    book = big_pdf(tmp_path / "book.pdf", 650)
+    assert main(["plan", str(book), "--series", "s", "--auto"]) == 1
+    assert "650 pages" in (err := capsys.readouterr().err) and "--range" in err

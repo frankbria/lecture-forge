@@ -16,6 +16,7 @@ from pathlib import Path
 
 import anthropic
 import openai
+import pymupdf
 
 from lecture_forge.config import Settings
 
@@ -27,6 +28,11 @@ DEFAULT_MODELS = {
     "openai": "gpt-5.5",
 }
 TIMEOUT_S = 1800  # a full script plus critique can take many minutes
+# Per-request PDF limits (provider docs): Claude API 600 pages (100 on 200k-context models)
+# and 32 MB per request, base64 included; OpenAI 50 MB per file, no documented page limit.
+MAX_PDF_PAGES = {"anthropic": 600}
+MAX_REQUEST_BYTES = {"anthropic": 32_000_000}
+MAX_PDF_BYTES = {"openai": 50_000_000}
 
 
 class ProviderError(Exception):
@@ -47,6 +53,28 @@ def retryable_status(status: int | None) -> bool:
 def _api_error(provider: str, e: Exception) -> ProviderError:
     return ProviderError(
         provider, str(e), retryable_status(getattr(e, "status_code", None))
+    )
+
+
+def check_pdf(name: str, pdf: Path, system: str, user: str) -> None:
+    """Refuse a PDF over the provider's per-request limits before uploading it."""
+    size = pdf.stat().st_size
+    with pymupdf.open(pdf) as doc:
+        pages = doc.page_count
+    request = 4 * -(-size // 3) + len(system.encode()) + len(user.encode())  # base64
+    if pages > MAX_PDF_PAGES.get(name, pages):
+        why = f"{pages} pages; {name} takes at most {MAX_PDF_PAGES[name]}"
+    elif request > MAX_REQUEST_BYTES.get(name, request):
+        why = f"{name} takes at most {MAX_REQUEST_BYTES[name] // 10**6} MB per request"
+    elif size > MAX_PDF_BYTES.get(name, size):
+        why = f"{name} takes at most {MAX_PDF_BYTES[name] // 10**6} MB per PDF"
+    else:
+        return
+    raise ProviderError(
+        name,
+        f"the PDF is too large ({pages} pages, {size / 10**6:.1f} MB): {why}. Plan one "
+        "chapter at a time with --range (lecture-forge outline lists the chapter "
+        "pages), or use the claude-code provider, which reads the pages as it goes",
     )
 
 
@@ -118,6 +146,8 @@ def _anthropic(system: str, user: str, pdf: Path | None, settings: Settings) -> 
     name = "anthropic"
     if not settings.anthropic_api_key:
         raise ProviderError(name, "ANTHROPIC_API_KEY is not set")
+    if pdf:
+        check_pdf(name, pdf, system, user)
     client = anthropic.Anthropic(
         api_key=settings.anthropic_api_key, max_retries=0, timeout=TIMEOUT_S
     )
@@ -158,6 +188,8 @@ def _openai(system: str, user: str, pdf: Path | None, settings: Settings) -> str
     name = "openai"
     if not settings.openai_api_key:
         raise ProviderError(name, "OPENAI_API_KEY is not set")
+    if pdf:
+        check_pdf(name, pdf, system, user)
     client = openai.OpenAI(
         api_key=settings.openai_api_key, max_retries=0, timeout=TIMEOUT_S
     )
