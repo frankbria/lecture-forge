@@ -139,6 +139,7 @@ def test_plan_prompt_carries_rules_digest_and_style_guide(book):
     system, user, pages = calls[0]
     assert "SCRIPT RULES" in system and str(MAX_MINUTES) in system
     assert "mid-proof" in system  # clean concept breaks
+    assert "scanned page image, words not counted" in system  # timing for scans
     assert "page 4: 5 words" in user
     assert pages == 6
     assert [e["start"] for e in plan["episodes"]] == [1, 4]

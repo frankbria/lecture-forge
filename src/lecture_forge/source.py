@@ -113,9 +113,10 @@ def extract_text(src: Source, start: int = 1, end: int | None = None) -> str:
 
 
 def _is_scan(page: pymupdf.Page) -> bool:
-    """An image over most of the page, with at most a stamped page number as text."""
-    # ponytail: fixed thresholds; a full-page figure with a 3-word caption counts too
-    if len(page.get_text().split()) > 3:
+    """An image over most of the page, with at most a stamped page number or scanner
+    footer as text."""
+    # ponytail: fixed thresholds; a full-page figure or cover with a short caption counts
+    if len(page.get_text().split()) > 10:
         return False
     covered = sum(
         abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()

@@ -37,8 +37,10 @@ hints only. Rules:
    several ideas; merge short sections that together form one idea.
 2. Timing: each episode's script will run 20 to {MAX_MINUTES} minutes (about 150 spoken
    words per minute). Judge from the content and the per-page word counts: dense,
-   proof-heavy pages need far more lecture time per page than expository prose. Never
-   plan an episode over {MAX_MINUTES} minutes; split it instead.
+   proof-heavy pages need far more lecture time per page than expository prose. A page
+   marked "scanned page image, words not counted" has no word count: judge it from the
+   attached page itself. Never plan an episode over {MAX_MINUTES} minutes; split it
+   instead.
 3. Clean breaks: end each episode at a clean concept boundary. Never break mid-proof,
    mid-example or mid-derivation.
 4. Skip front matter, exercises, indexes and bibliographies unless they carry the material.

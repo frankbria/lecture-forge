@@ -26,9 +26,10 @@ def scanned_pdf(path, pages):
         if kind in "sno":
             page.insert_image(page.rect, pixmap=pix)
         if kind == "o":
-            page.insert_text((72, 72), "Words a scanner recognized", render_mode=3)
+            ocr = "A group is a set with an operation that is associative. " * 3
+            page.insert_textbox(pymupdf.Rect(72, 72, 540, 760), ocr, render_mode=3)
         if kind == "n":
-            page.insert_text((290, 820), "12")
+            page.insert_text((72, 820), "12  Scanned by HP 12 Oct 2026 14:32")
     doc.save(path)
     return path
 
@@ -236,7 +237,7 @@ def test_scanned_pages_are_page_images_with_at_most_a_stamped_number(tmp_path):
     src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbsfno"))
     # blank, figure and OCR'd pages are no scans; one with a stamped page number is
     assert scanned_pages(src) == [2, 4, 6]
-    assert extract_text(src, 7, 7).split() == ["Words", "a", "scanner", "recognized"]
+    assert len(extract_text(src, 7, 7).split()) == 33  # counted like any text page
     assert scanned_pages(src, 3, 4) == [4]
     assert extract_text(src, 2, 2).strip() == ""  # what the planner can't count
 
