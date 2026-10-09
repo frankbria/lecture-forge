@@ -9,7 +9,7 @@ from lecture_forge import render
 from lecture_forge.config import ConfigError, Settings, load_settings
 from lecture_forge.plan import MAX_MINUTES, PlanError, load_plan, make_plan, write_plan
 from lecture_forge.providers import ProviderError, complete
-from lecture_forge.source import Source, open_source, outline
+from lecture_forge.source import Source, open_source, outline, scanned_note
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
 from lecture_forge.write import WriteError, script_state, stale_reason, write_episode
 
@@ -56,6 +56,8 @@ def cmd_outline(args: argparse.Namespace) -> None:
     src = open_source(args.source)
     unit = "pages" if src.kind == "pdf" else "lines"
     print(f"{src.path.name}: {src.length} {unit}")
+    if note := scanned_note(src):
+        print(note)
     entries = outline(src)
     if not entries:
         print("(no bookmarks or headings found)")
@@ -110,6 +112,8 @@ def cmd_plan(args: argparse.Namespace) -> None:
 
     unit = "pages" if src.kind == "pdf" else "lines"
     print(f"Planning {src.path.name} {unit} {start}-{end} with {settings.provider}...")
+    if note := scanned_note(src, start, end):
+        print(note)
     plan = make_plan(src, guide, start, end, call)
     write_plan(plan, src, out, force=args.force)
     episodes = plan["episodes"]

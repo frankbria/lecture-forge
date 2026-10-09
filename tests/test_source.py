@@ -1,7 +1,28 @@
 import pymupdf
 import pytest
 
-from lecture_forge.source import extract_text, open_source, outline, slice_pdf
+from lecture_forge.source import (
+    extract_text,
+    open_source,
+    outline,
+    scanned_pages,
+    slice_pdf,
+)
+
+
+def scanned_pdf(path, pages):
+    """One page per letter: t has text, s is a scan (an image, no text layer), b is blank."""
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
+    pix.clear_with(200)
+    doc = pymupdf.open()
+    for kind in pages:
+        page = doc.new_page()
+        if kind == "t":
+            page.insert_text((72, 72), "Some words here")
+        elif kind == "s":
+            page.insert_image(pymupdf.Rect(72, 72, 300, 300), stream=pix.tobytes("png"))
+    doc.save(path)
+    return path
 
 
 @pytest.fixture
@@ -201,3 +222,14 @@ def test_front_matter_ends_before_its_first_blank_line(tmp_path):
 
 def test_an_underline_indented_four_spaces_continues_the_paragraph(tmp_path):
     assert md_outline(tmp_path, "Para\n    ===\nPara\n    ---\n") == []
+
+
+def test_scanned_pages_are_images_without_a_text_layer(tmp_path):
+    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbs"))
+    assert scanned_pages(src) == [2, 4]  # the blank page 3 is no scan
+    assert scanned_pages(src, 3, 4) == [4]
+    assert extract_text(src, 2, 2).strip() == ""  # what the planner can't count
+
+
+def test_text_sources_have_no_scanned_pages(notes):
+    assert scanned_pages(open_source(notes)) == []

@@ -4,6 +4,7 @@ import shutil
 import pymupdf
 import pytest
 import yaml
+from test_source import scanned_pdf
 
 from lecture_forge import providers
 from lecture_forge.cli import main
@@ -68,6 +69,13 @@ def test_pdf_digest_lists_absolute_page_word_counts(book):
     digest = source_digest(book, 2, 3)
     assert "page 2: 22 words" in digest and "page 3: 32 words" in digest
     assert "page 1:" not in digest and "page 4:" not in digest
+
+
+def test_pdf_digest_marks_scanned_pages_instead_of_counting_zero_words(tmp_path):
+    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsb"))
+    assert source_digest(src, 1, 3) == (
+        "page 1: 3 words\npage 2: scanned, no text layer\npage 3: 0 words\n"
+    )
 
 
 def test_text_digest_numbers_each_line(notes):
@@ -386,3 +394,21 @@ def test_plan_yaml_is_replaced_atomically(tmp_path, book, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         write_plan(new, book, out, force=True)
     assert out.read_bytes() == before
+
+
+def test_plan_command_notes_scanned_pages_in_its_range(
+    project, tmp_path, monkeypatch, capsys
+):
+    scan = scanned_pdf(tmp_path / "scan.pdf", "tssts")
+    prompts = []
+
+    def fake(system, user, pdf, settings):
+        prompts.append(user)
+        return plan_json(episode(2, 4))
+
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", fake)
+    args = ["plan", str(scan), "--series", "s", "--range", "2-4", "--auto"]
+    assert main(args) == 0
+    out = capsys.readouterr().out
+    assert "note: 2 of 3 pages have no text layer (scanned)" in out
+    assert "page 3: scanned, no text layer" in prompts[0]

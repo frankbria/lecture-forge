@@ -9,7 +9,14 @@ from pathlib import Path
 
 import yaml
 
-from lecture_forge.source import Source, extract_text, open_source, outline, slice_pdf
+from lecture_forge.source import (
+    Source,
+    extract_text,
+    open_source,
+    outline,
+    scanned_pages,
+    slice_pdf,
+)
 from lecture_forge.style_guide import StyleGuide
 
 MAX_MINUTES = 30  # style guide: 20-30 minutes per episode; anything longer gets split
@@ -53,9 +60,12 @@ def source_digest(src: Source, start: int, end: int) -> str:
     if src.kind == "text":
         lines = extract_text(src, start, end).splitlines()
         return "".join(f"{n}| {line}\n" for n, line in enumerate(lines, start))
+    scanned = set(scanned_pages(src, start, end))  # 0 words would mislead the planner
     # ponytail: reopens the PDF per page; fine for books, batch it if planning gets slow
     return "".join(
-        f"page {n}: {len(extract_text(src, n, n).split())} words\n"
+        f"page {n}: scanned, no text layer\n"
+        if n in scanned
+        else f"page {n}: {len(extract_text(src, n, n).split())} words\n"
         for n in range(start, end + 1)
     )
 
