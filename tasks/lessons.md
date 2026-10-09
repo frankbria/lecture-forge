@@ -45,3 +45,10 @@ Process and tooling lessons from working on this repo. Code and product follow-u
 - **opencode reviews the checkout, not only the diff it is given.** With the worktree as its cwd, it found the commit made after the prompt's diff and reviewed the branch tip. Start it from the worktree after the last commit, or say in the PR comment which SHA it saw.
 - **`code-reviewer` (an agent type with Bash) ran the tests itself** and gave concrete edge-case findings: replace-vs-accumulate, negative hand-edited values. Prefer it to `feature-dev:code-reviewer` (see #26).
 - **ruff reformats tests between edits.** A scripted `str.replace` written against text you wrote earlier can miss after `ruff format` has wrapped it. Re-read the current text before a scripted edit.
+
+## 2026-10-09: implementing #5 (PR #47)
+
+- **Make the mutation helper fail loudly when the mutation doesn't apply.** `ruff format` had re-wrapped the target line, so the replace assertion failed. The helper went on to run pytest on the unmutated code anyway and printed "34 passed", which looked like a surviving mutant. Exit before pytest when the replace fails, and grep the formatted line first.
+- **Probe a reviewer's example before using it as a test.** The internal review said `---\n# One\ntext\n---` should keep `One` and `Two`. Under CommonMark, `text` underlined by `---` is also an H2, so the first test expectation built from it was wrong. Running the example settled it.
+- **`gh pr edit` and `gh pr merge` can fail on this repo.** `gh pr edit` hit the Projects (classic) GraphQL deprecation: it exited 8 and left the body unchanged without saying so. `gh pr merge` can't delete a branch checked out in a worktree. Use `gh api -X PATCH repos/frankbria/lecture-forge/pulls/N -F body=@file` and `gh api -X PUT …/pulls/N/merge -f merge_method=squash`, then remove the worktree and delete the branch.
+- **opencode stalled on a 6 KB re-review** (exit 75) after finishing round 1 normally. codex from the worktree (no `.env` there, since it's untracked) worked as the fallback. Stalls aren't tied to prompt size.
