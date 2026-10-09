@@ -9,7 +9,14 @@ from pathlib import Path
 
 import yaml
 
-from lecture_forge.source import Source, extract_text, open_source, outline, slice_pdf
+from lecture_forge.source import (
+    Source,
+    extract_text,
+    open_source,
+    outline,
+    scanned_pages,
+    slice_pdf,
+)
 from lecture_forge.style_guide import StyleGuide
 
 MAX_MINUTES = 30  # style guide: 20-30 minutes per episode; anything longer gets split
@@ -30,8 +37,10 @@ hints only. Rules:
    several ideas; merge short sections that together form one idea.
 2. Timing: each episode's script will run 20 to {MAX_MINUTES} minutes (about 150 spoken
    words per minute). Judge from the content and the per-page word counts: dense,
-   proof-heavy pages need far more lecture time per page than expository prose. Never
-   plan an episode over {MAX_MINUTES} minutes; split it instead.
+   proof-heavy pages need far more lecture time per page than expository prose. A page
+   marked "scanned page image, words not counted" has no word count: judge it from the
+   attached page itself. Never plan an episode over {MAX_MINUTES} minutes; split it
+   instead.
 3. Clean breaks: end each episode at a clean concept boundary. Never break mid-proof,
    mid-example or mid-derivation.
 4. Skip front matter, exercises, indexes and bibliographies unless they carry the material.
@@ -53,9 +62,12 @@ def source_digest(src: Source, start: int, end: int) -> str:
     if src.kind == "text":
         lines = extract_text(src, start, end).splitlines()
         return "".join(f"{n}| {line}\n" for n, line in enumerate(lines, start))
+    scanned = set(scanned_pages(src, start, end))  # 0 words would mislead the planner
     # ponytail: reopens the PDF per page; fine for books, batch it if planning gets slow
     return "".join(
-        f"page {n}: {len(extract_text(src, n, n).split())} words\n"
+        f"page {n}: scanned page image, words not counted\n"
+        if n in scanned
+        else f"page {n}: {len(extract_text(src, n, n).split())} words\n"
         for n in range(start, end + 1)
     )
 

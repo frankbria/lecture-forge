@@ -107,9 +107,43 @@ def extract_text(src: Source, start: int = 1, end: int | None = None) -> str:
     if src.kind == "text":
         lines = _read(src.path).splitlines(keepends=True)
         return "".join(lines[start - 1 : end])
-    # ponytail: text layer only; scanned PDFs come back empty, add OCR if one shows up
+    # The text layer only: a scanned page comes back (nearly) empty (see scanned_pages).
     with pymupdf.open(src.path) as doc:
         return "\n".join(doc[i].get_text() for i in range(start - 1, end))
+
+
+def _is_scan(page: pymupdf.Page) -> bool:
+    """An image over most of the page, with at most a stamped page number or scanner
+    footer as text."""
+    # ponytail: fixed thresholds; a full-page figure or cover with a short caption counts
+    if len(page.get_text().split()) > 10:
+        return False
+    covered = sum(
+        abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()
+    )
+    return covered >= 0.5 * abs(page.rect)
+
+
+def scanned_pages(src: Source, start: int = 1, end: int | None = None) -> list[int]:
+    """PDF pages that are scans, whose words the text layer doesn't hold. Nothing is
+    OCR'd: every provider is sent the pages themselves and reads them as images."""
+    if src.kind != "pdf":
+        return []
+    end = src.length if end is None else end
+    _check_range(src, start, end)
+    with pymupdf.open(src.path) as doc:
+        return [n for n in range(start, end + 1) if _is_scan(doc[n - 1])]
+
+
+def scanned_note(src: Source, start: int = 1, end: int | None = None) -> str | None:
+    """A note for the user when pages in the range are scans, else None."""
+    end = src.length if end is None else end
+    if not (scanned := scanned_pages(src, start, end)):
+        return None
+    return (
+        f"note: {len(scanned)} of {end - start + 1} pages are scans (page images). "
+        "The LLM reads them as images; nothing is OCR'd."
+    )
 
 
 def slice_pdf(src: Source, start: int, end: int, out: str | Path) -> Path:

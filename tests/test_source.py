@@ -1,7 +1,37 @@
 import pymupdf
 import pytest
 
-from lecture_forge.source import extract_text, open_source, outline, slice_pdf
+from lecture_forge.source import (
+    extract_text,
+    open_source,
+    outline,
+    scanned_pages,
+    slice_pdf,
+)
+
+
+def scanned_pdf(path, pages):
+    """One page per letter: t has text, f text and a figure, s is a scan (a page image,
+    no text layer), n a scan with a stamped page number, o an OCR'd scan (a page image
+    under an invisible text layer), b is blank."""
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
+    pix.clear_with(200)
+    doc = pymupdf.open()
+    for kind in pages:
+        page = doc.new_page()
+        if kind in "tf":
+            page.insert_text((72, 72), "Some words here")
+        if kind == "f":
+            page.insert_image(pymupdf.Rect(72, 100, 300, 328), pixmap=pix)
+        if kind in "sno":
+            page.insert_image(page.rect, pixmap=pix)
+        if kind == "o":
+            ocr = "A group is a set with an operation that is associative. " * 3
+            page.insert_textbox(pymupdf.Rect(72, 72, 540, 760), ocr, render_mode=3)
+        if kind == "n":
+            page.insert_text((72, 820), "12  Scanned by HP 12 Oct 2026 14:32")
+    doc.save(path)
+    return path
 
 
 @pytest.fixture
@@ -201,3 +231,16 @@ def test_front_matter_ends_before_its_first_blank_line(tmp_path):
 
 def test_an_underline_indented_four_spaces_continues_the_paragraph(tmp_path):
     assert md_outline(tmp_path, "Para\n    ===\nPara\n    ---\n") == []
+
+
+def test_scanned_pages_are_page_images_with_at_most_a_stamped_number(tmp_path):
+    src = open_source(scanned_pdf(tmp_path / "scan.pdf", "tsbsfno"))
+    # blank, figure and OCR'd pages are no scans; one with a stamped page number is
+    assert scanned_pages(src) == [2, 4, 6]
+    assert len(extract_text(src, 7, 7).split()) == 33  # counted like any text page
+    assert scanned_pages(src, 3, 4) == [4]
+    assert extract_text(src, 2, 2).strip() == ""  # what the planner can't count
+
+
+def test_text_sources_have_no_scanned_pages(notes):
+    assert scanned_pages(open_source(notes)) == []
