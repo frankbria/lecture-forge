@@ -11,6 +11,12 @@ TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 HEADING = re.compile(
     r"^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$"
 )  # closing #s need a space before them
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+SETEXT = re.compile(r"^ {0,3}(=+|-+)\s*$")  # underlines the text line above it
+# Lines a rule below can't make a heading: list items, quotes, tables, HTML, indented.
+NOT_TEXT = re.compile(r"\s|[>|<]|[-+*]\s|\d+[.)]\s")
+YAML_KEY = re.compile(r"[\w-]+\s*:")
+RULE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")  # ---, ***, _ _ _: a thematic break
 
 
 @dataclass(frozen=True)
@@ -21,7 +27,7 @@ class Source:
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8-sig")  # -sig: drop a byte order mark
 
 
 def open_source(path: str | Path) -> Source:
@@ -52,12 +58,41 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
             return [
                 (lvl, title, page) for lvl, title, page in doc.get_toc() if page >= 1
             ]
-    entries, in_fence = [], False
-    for n, line in enumerate(_read(src.path).splitlines(), 1):
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-        elif not in_fence and (m := HEADING.match(line)):
+    lines = _read(src.path).splitlines()
+    start = 0
+    # YAML front matter: its closing --- underlines nothing. It has no blank lines, so a
+    # blank before the closer means the first --- was a rule.
+    if len(lines) > 1 and lines[0].strip() == "---" and YAML_KEY.match(lines[1]):
+        stops = (
+            i for i in range(1, len(lines)) if lines[i].strip() in ("", "---", "...")
+        )
+        end = next(stops, 0)
+        start = end + 1 if end and lines[end].strip() else 0
+    # text: (line, title) of the line an underline below it would make a heading
+    entries, fence, text = [], "", None
+    for n, line in enumerate(lines[start:], start + 1):
+        s = line.strip()
+        # A fence closes only on the same character, at least as long, nothing after.
+        if fence:
+            fence = "" if s.startswith(fence) and set(s) == {fence[0]} else fence
+            continue
+        if m := FENCE.match(line):
+            fence, text = m[1], None
+        elif m := HEADING.match(line):
             entries.append((len(m[1]), m[2], n))
+            text = None
+        elif text and (u := SETEXT.match(line)):
+            entries.append((1 if u[1][0] == "=" else 2, text[1], text[0]))
+            text = None
+        else:  # blank lines and rules are no heading text
+            text = (
+                None
+                if not s
+                or NOT_TEXT.match(line)
+                or RULE.match(line)
+                or SETEXT.match(line)
+                else (n, s)
+            )
     return entries
 
 

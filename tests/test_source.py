@@ -134,3 +134,70 @@ def test_heading_keeps_hashes_that_belong_to_the_title(tmp_path):
         (2, "F# basics", 2),
         (3, "Closed", 3),
     ]
+
+
+def md_outline(tmp_path, text):
+    p = tmp_path / "n.md"
+    p.write_text(text, encoding="utf-8")
+    return outline(open_source(p))
+
+
+def test_setext_headings_have_their_level_and_text_line(tmp_path):
+    text = "Groups\n======\nintro\n\nCosets  \n---\nbody\n# Rings\n"
+    assert md_outline(tmp_path, text) == [
+        (1, "Groups", 1),
+        (2, "Cosets", 5),
+        (1, "Rings", 8),
+    ]
+
+
+def test_a_rule_under_nothing_or_under_a_heading_is_no_heading(tmp_path):
+    text = "intro\n\n---\n# Groups\n---\n***\n---\n"
+    assert md_outline(tmp_path, text) == [(1, "Groups", 4)]
+
+
+def test_tilde_fences_hide_headings_until_the_same_fence_closes_them(tmp_path):
+    text = (
+        "~~~python\n# not a heading\n```\nNot one\n===\n~~~\n# Groups\n"
+        "````\n# hidden\n```\n````\n# Rings\n"
+    )
+    assert md_outline(tmp_path, text) == [(1, "Groups", 7), (1, "Rings", 12)]
+    # an underline after a fence underlines the fence, not the text before it
+    assert md_outline(tmp_path, "Intro\n```\ncode\n```\n===\n") == []
+
+
+def test_yaml_front_matter_is_no_heading(tmp_path):
+    text = "---\ntitle: Algebra notes\ntags: [math]\n---\nGroups\n======\n"
+    assert md_outline(tmp_path, text) == [(1, "Groups", 5)]
+    # a leading rule that never closes is no front matter: nothing is hidden
+    assert md_outline(tmp_path, "---\nGroups\n======\n") == [(1, "Groups", 2)]
+
+
+def test_a_note_opening_with_a_rule_is_no_front_matter(tmp_path):
+    assert md_outline(tmp_path, "---\n# One\n\n---\n# Two\n") == [
+        (1, "One", 2),
+        (1, "Two", 5),
+    ]
+
+
+def test_front_matter_after_a_byte_order_mark_is_still_skipped(tmp_path):
+    p = tmp_path / "n.md"
+    p.write_bytes("---\ntitle: x\n---\n# Real\n".encode("utf-8-sig"))
+    assert outline(open_source(p)) == [(1, "Real", 4)]
+
+
+@pytest.mark.parametrize(
+    "line", ["- item one", "* item", "1. first", "2) second", "> quote", "| 1 | 2 |",
+             "    indented code", "  list continuation", "<div>"],
+)  # fmt: skip
+def test_a_rule_under_a_list_quote_table_or_indented_line_is_no_heading(tmp_path, line):
+    assert md_outline(tmp_path, f"{line}\n---\n{line}\n===\n") == []
+
+
+def test_front_matter_ends_before_its_first_blank_line(tmp_path):
+    text = "---\nDate: 2026-10-08\n\nGroups\n======\n\nbody\n\n---\n\nRings\n======\n"
+    assert md_outline(tmp_path, text) == [(1, "Groups", 4), (1, "Rings", 11)]
+
+
+def test_an_underline_indented_four_spaces_continues_the_paragraph(tmp_path):
+    assert md_outline(tmp_path, "Para\n    ===\nPara\n    ---\n") == []
