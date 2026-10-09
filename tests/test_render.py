@@ -399,6 +399,7 @@ def test_render_yes_runs_unattended_and_reports_paths(project, capsys):
     assert main(["render", "algebra", "--episode", "2", "--yes"]) == 0
     out = capsys.readouterr().out
     assert "02 - Rings-Ideals.mp3" in out and tts.calls
+    assert "pieces reused)" in out  # the balance didn't move: no credits claimed
 
 
 def test_render_more_than_left_on_plan_is_refused(project, capsys, monkeypatch):
@@ -537,3 +538,141 @@ def test_render_one_unwritten_episode_is_an_error(project, capsys):
     _, tts = project
     assert main(["render", "algebra", "--episode", "3", "--yes"]) == 1
     assert "write episode 3 first" in capsys.readouterr().err and tts.calls == []
+
+
+# --- measured credits -------------------------------------------------------------------------
+
+
+def readings(*values):
+    """A balance reader returning `values` in order, recording each call."""
+    calls, it = [], iter(values)
+    return calls, lambda: calls.append(1) or next(it)
+
+
+def marker(series, n=1):
+    return json.loads(
+        (episode_dir(series, n) / "render.json").read_text(encoding="utf-8")
+    )
+
+
+def test_render_records_the_credits_it_used_and_a_skip_reads_no_balance(
+    series, tmp_path, beep
+):
+    calls, balance = readings(10000, 9560)
+    result = run(series, tmp_path, FakeTTS(beep), balance=balance)
+    assert result.credits == 440 and len(calls) == 2  # before and after, not per piece
+    m = marker(series)
+    assert m["chars_sent"] == result.billed and m["credits_used"] == 440
+    calls, balance = readings()
+    again = run(series, tmp_path, FakeTTS(beep), balance=balance)
+    assert (
+        again.skipped and calls == []
+    )  # the measurement doesn't spoil the up-to-date check
+
+
+# lagging, topped up, unreadable after, unreadable before
+@pytest.mark.parametrize(
+    "before,after", [(10000, 10000), (10000, 10200), (10000, None), (None, 9000)]
+)
+def test_a_balance_that_did_not_drop_records_no_measurement(
+    series, tmp_path, beep, before, after
+):
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(before, after)[1])
+    assert result.credits is None and "credits_used" not in marker(series)
+
+
+def test_a_fully_cached_render_reads_no_balance(series, tmp_path, beep):
+    run(series, tmp_path, FakeTTS(beep))
+    calls, balance = readings()
+    result = run(series, tmp_path, FakeTTS(beep), force=True, balance=balance)
+    assert not result.skipped and result.billed == 0 and calls == []
+
+
+def test_a_rebuild_keeps_the_measurement_of_the_same_model(series, tmp_path, beep):
+    run(series, tmp_path, FakeTTS(beep), balance=readings(10000, 9560)[1])
+    plan_path = series / "plan.yaml"
+    data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    data["episodes"][0]["title"] = "Cosets, Renamed"
+    plan_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    run(series, tmp_path, FakeTTS(beep))  # from cache, nothing measured
+    assert marker(series)["credits_used"] == 440
+    run(series, tmp_path, FakeTTS(beep), model="eleven_multilingual_v2")
+    assert "credits_used" not in marker(series)  # never credited to another model
+
+
+def test_an_edit_adds_its_measurement_to_the_episodes_earlier_one(
+    series, tmp_path, beep
+):
+    first = run(series, tmp_path, FakeTTS(beep), balance=readings(10000, 9560)[1])
+    script = episode_dir(series, 1) / "script.txt"
+    script.write_text(
+        script.read_text(encoding="utf-8") + "\nOne more.\n", encoding="utf-8"
+    )
+    edit = run(series, tmp_path, FakeTTS(beep), balance=readings(9560, 9550)[1])
+    assert edit.credits == 10  # this run's own cost
+    m = marker(series)  # the big sample isn't replaced by the small one
+    assert m["chars_sent"] == first.billed + edit.billed and m["credits_used"] == 450
+
+
+def test_credit_rate_is_measured_per_series_and_model(tmp_path):
+    def mark(n, text):
+        d = episode_dir(tmp_path, n)
+        d.mkdir(parents=True)
+        (d / "render.json").write_text(text, encoding="utf-8")
+
+    assert r.credit_rate(tmp_path, "eleven_v3") is None  # nothing rendered yet
+    mark(1, json.dumps({"model": "eleven_v3", "chars_sent": 1000, "credits_used": 400}))
+    mark(
+        2, json.dumps({"model": "eleven_v3", "chars_sent": 3000, "credits_used": 1360})
+    )
+    mark(3, json.dumps({"model": "eleven_v3"}))  # rendered, never measured
+    mark(4, '{"model": "eleven_v3", "chars_')  # torn
+    mark(5, json.dumps({"model": "eleven_v4", "chars_sent": 10, "credits_used": 10}))
+    mark(6, json.dumps({"model": "eleven_v3", "chars_sent": 9, "credits_used": -99}))
+    mark(7, json.dumps({"model": "eleven_v3", "chars_sent": True, "credits_used": 1}))
+    assert r.credit_rate(tmp_path, "eleven_v3") == pytest.approx(0.44)
+    assert r.credit_rate(tmp_path, "eleven_multilingual_v2") is None
+
+
+@pytest.mark.parametrize("measured", [True, False])
+def test_render_preview_and_refusal_use_the_measured_rate(
+    project, capsys, monkeypatch, measured
+):
+    root, tts = project
+    sdir = root / "series" / "algebra"
+    plan = load_plan(sdir / "plan.yaml")
+    c2 = r.cost(plan, plan["episodes"][1], sdir, settings(root))
+    if measured:  # episode 1 rendered earlier at 0.44 credits per character
+        episode_dir(sdir, 1).joinpath("render.json").write_text(json.dumps(
+            {"script_sha256": "x", "model": "eleven_v3", "voice": "voice-1",
+             "output": "gone.mp3", "chars_sent": 1000, "credits_used": 440}), encoding="utf-8")  # fmt: skip
+    left = round(c2 * 0.6)  # under the character count, over the measured estimate
+    vals = iter([left, 50000, 49000])  # preview, then before and after episode 2
+    monkeypatch.setattr(r, "characters_left", lambda s: next(vals))
+    code = main(["render", "algebra", "--episode", "2", "--yes"])
+    out, err = capsys.readouterr()
+    if measured:
+        assert code == 0 and tts.calls
+        assert f"~{round(c2 * 0.44):,} credits" in out and "0.44/char, measured" in out
+        assert f"{left:,} credits left" in out
+        assert f"({c2:,} characters sent, 0 pieces reused, 1,000 credits)" in out
+    else:
+        assert code == 1 and tts.calls == []
+        assert (
+            f"{c2:,} characters" in out
+            and "no render measured yet for eleven_v3" in out
+        )
+        assert (
+            f"about {c2:,} credits" in err and f"only {left:,} characters left" in err
+        )
+
+
+def test_render_all_measures_each_episode_between_its_own_balance_reads(
+    project, monkeypatch
+):
+    root, _ = project
+    vals = iter([100000, 100000, 99000, 99000, 98500])  # preview, then per episode
+    monkeypatch.setattr(r, "characters_left", lambda s: next(vals))
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    sdir = root / "series" / "algebra"
+    assert [marker(sdir, n)["credits_used"] for n in (1, 2)] == [1000, 500]

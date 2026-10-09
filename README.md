@@ -26,7 +26,7 @@ The planner reads the content itself and breaks at clean concept boundaries, one
 
 `write` drafts each episode under your style guide, critiques and revises it against the source, and saves `series/<slug>/episodes/NN/script.txt` (spoken text only) plus the production notes, puzzle answer and summary that the next episode builds on. Read the scripts before rendering.
 
-`render` shows the characters it will spend and what's left on your ElevenLabs plan, and asks before spending (`--yes` to skip). It splits each script into pieces, caches every piece so nothing is paid for twice, joins them with ffmpeg and writes tagged MP3s (album = series, track = episode) into your Dropbox. Requires `ffmpeg`.
+`render` shows the estimated credits (measured from your earlier renders of that model; characters until the first render) and what's left on your ElevenLabs plan, and asks before spending (`--yes` to skip). It splits each script into pieces, caches every piece so nothing is paid for twice, joins them with ffmpeg and writes tagged MP3s (album = series, track = episode) into your Dropbox. Requires `ffmpeg`.
 
 `run` chains the three steps. Each step skips finished work, so after a failure or Ctrl-C the same command picks up where it stopped. Without `--auto` it stops after a new plan so you can edit it. With `--auto` there are no review stops, but spending ElevenLabs credits still needs `--yes` (otherwise it writes the scripts and asks, or refuses with no terminal).
 
