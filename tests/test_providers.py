@@ -437,7 +437,7 @@ KEYS = {"anthropic_api_key": "sk-ant-fake", "openai_api_key": "sk-fake"}
             "anthropic",
             601,
             0,
-            "601 pages, 0.0 MB): claude-opus-5-5 takes at most 600 pages",
+            "claude-opus-5-5 takes at most 600 pages",
         ),
         ("anthropic", 1, 24_000_000, "anthropic takes at most 32 MB per request"),
         ("openai", 1, 50_000_000, "openai takes at most 50 MB per PDF"),
