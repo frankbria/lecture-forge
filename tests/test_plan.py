@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 
 import pymupdf
@@ -396,6 +397,25 @@ def test_plan_yaml_is_replaced_atomically(tmp_path, book, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         write_plan(new, book, out, force=True)
     assert out.read_bytes() == before
+
+
+def test_save_syncs_the_temp_file_before_the_rename(tmp_path, monkeypatch):
+    """After a power cut, ext4 can keep the rename and lose unsynced data: an empty file."""
+    from lecture_forge import plan as plan_mod
+
+    calls = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(
+        plan_mod.os, "fsync", lambda fd: (calls.append("fsync"), real_fsync(fd))
+    )
+    monkeypatch.setattr(
+        plan_mod.os,
+        "replace",
+        lambda s, d: (calls.append("replace"), real_replace(s, d)),
+    )
+    plan_mod.save(tmp_path / "state.json", "{}")
+    assert calls == ["fsync", "replace"]
+    assert (tmp_path / "state.json").read_text(encoding="utf-8") == "{}\n"
 
 
 def test_plan_command_notes_scanned_pages_in_its_range(

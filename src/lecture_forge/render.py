@@ -218,7 +218,9 @@ def _script(series_dir: Path, plan: dict, ep: dict) -> str:
     return (episode_dir(series_dir, n) / "script.txt").read_text(encoding="utf-8")
 
 
-def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
+def _target(
+    plan: dict, ep: dict, series_dir: Path, settings: Settings, *, warn: bool = True
+):
     """(script, output MP3, render state, previous state, up to date) for one episode."""
     script = _script(series_dir, plan, ep)
     out = (
@@ -241,7 +243,8 @@ def _target(plan: dict, ep: dict, series_dir: Path, settings: Settings):
         ):  # bad JSON or not UTF-8 (JSONDecodeError, UnicodeDecodeError)
             previous = None
         if not isinstance(previous, dict):  # torn by a crash, or hand-edited
-            log.warning("%s is unreadable; rebuilding from cached pieces", marker)
+            if warn:
+                log.warning("%s is unreadable; rebuilding from cached pieces", marker)
             previous = {}
     up_to_date = out.exists() and {k: previous.get(k) for k in state} == state
     return script, out, state, previous, up_to_date
@@ -273,7 +276,8 @@ def cost(
 ) -> int:
     """Characters this episode would send to ElevenLabs now: 0 if it is already rendered
     (and not forced), else only the pieces not yet cached."""
-    script, _, _, _, up_to_date = _target(plan, ep, series_dir, settings)
+    # warn=False: a preview rebuilds nothing, and render_episode warns when it does.
+    script, _, _, _, up_to_date = _target(plan, ep, series_dir, settings, warn=False)
     if up_to_date and not force:
         return 0
     audio = episode_dir(series_dir, ep["n"]) / "audio"

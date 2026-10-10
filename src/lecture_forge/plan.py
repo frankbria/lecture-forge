@@ -193,9 +193,13 @@ def series_dir(root: str | Path, slug: str) -> Path:
 
 
 def save(path: Path, text: str) -> None:
-    """Write via a temp file and an atomic rename: a crash never leaves a half-written file."""
+    """Write via a synced temp file and an atomic rename: neither a crash nor a power cut
+    leaves a half-written file."""
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text.strip() + "\n", encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text.strip() + "\n")
+        f.flush()
+        os.fsync(f.fileno())  # or a power cut can keep the rename and lose the data
     os.replace(tmp, path)
 
 
