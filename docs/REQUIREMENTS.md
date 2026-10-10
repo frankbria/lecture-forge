@@ -7,11 +7,11 @@ Turn a textbook (or one chapter of it) into a series of single-voice audio lectu
 - Input: a PDF (a full book or one chapter), a Markdown file, or a plain-text file.
 - Output: one tagged MP3 per episode, about 20–30 minutes long, saved to a synced Dropbox folder.
 - Every episode follows the style guide: it opens with a problem, works through one spine example, and ends with a puzzle, and the next episode answers that puzzle.
-- CLI first. A GUI comes later and wraps the same core functions, so the core library must not depend on the CLI.
+- **One engine, two front ends** (decided 2026-10-09). The core is a set of Python functions, the engine, that the CLI and a later GUI both call. The two front ends may offer different commands. Every decision a front end needs comes from the engine, never from a copy in either front end: which episodes to write, the render cost preview and balance check, and provider switching. The engine never prints, prompts, or depends on either front end. The CLI comes first. The GUI will be used on Windows (desktop or laptop) and on Android (phone or tablet). The engine can't run on Android (it needs Python, ffmpeg and the source files), so there the GUI reaches the machine that runs it. The GUI's form is not decided yet.
 
 ## Non-goals (v0.1)
 
-- GUI, web app, podcast RSS feed, multiple voices or speakers, a database, translation.
+- A GUI (later; see Goals), podcast RSS feed, multiple voices or speakers, a database, translation.
 
 ## Pipeline
 
@@ -137,5 +137,5 @@ Credits and per-use API charges are spent **only when they have to be**. Each ki
 4. **M4:** `write` (script pass, critique pass, episode-to-episode state).
 5. **M5:** `render` (ElevenLabs, chunking, ffmpeg, ID3, idempotency).
 6. **M6:** `run --auto`; end-to-end test on a real chapter.
-7. **Later:** GUI over the same core.
+7. **Later:** a GUI over the same engine (see Goals). Prerequisites: [#32](https://github.com/frankbria/lecture-forge/issues/32) moves the remaining decisions out of the CLI, and its companion issues add an explicit project root, progress callbacks, and the `run` chain to the engine.
 8. **Later:** custom pronunciation. Turn the pronunciation hints in each episode's production notes into an ElevenLabs pronunciation dictionary, applied at render time. *Deferred: tracked in [#1](https://github.com/frankbria/lecture-forge/issues/1).*
