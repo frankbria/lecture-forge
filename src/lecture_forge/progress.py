@@ -6,7 +6,8 @@ can say "critiquing..." while it happens.
 Failures are not events: the engine raises its domain exception, as without a callback. A
 callback that raises stops the work right there; every step is resumable (paid audio pieces
 are cached first), so that is a safe way to cancel. Raising on "done" reports a render that
-did finish as failed, so don't.
+did finish as failed, so don't. Events arrive synchronously on the thread that called the
+engine: a GUI running the engine on a worker thread hands them to its UI thread itself.
 """
 
 from collections.abc import Callable
