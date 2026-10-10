@@ -21,7 +21,7 @@ from lecture_forge.style_guide import StyleGuideError, load_style_guide
 from lecture_forge.write import (
     WriteError,
     episodes_to_write,
-    script_state,
+    on_old_recap,
     write_episode,
 )
 
@@ -134,17 +134,12 @@ def cmd_write(args: argparse.Namespace) -> None:
             f"{plan_path} not found; run `lecture-forge plan` first"
         )
     plan = load_plan(plan_path, root=ROOT)
-
-    def state(ep: dict) -> str:
-        return script_state(series_dir, plan, ep)
-
     todo = episodes_to_write(plan, series_dir, episode=args.episode, force=args.force)
     settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     call = _provider_call(settings, args.auto)
     unit = plan["unit"]
     for ep, action, why in todo:
-        rewriting = action == "rewrite"
         if action == "skip":
             print(f"Episode {ep['n']}: {ep['title']}: {why}, skipping")
             continue
@@ -165,15 +160,10 @@ def cmd_write(args: argparse.Namespace) -> None:
             print(
                 f"  note: the writer suggests a split: {w.split} (plan.yaml is unchanged)"
             )
-        later = [
-            str(e["n"])
-            for e in plan["episodes"]
-            if e["n"] > ep["n"] and state(e) != "missing"
-        ]
-        if rewriting and args.episode is not None and later:
+        if later := on_old_recap(plan, series_dir, todo, ep):
             print(
-                f"  note: episode {', '.join(later)} was written from the old summary and "
-                "puzzle; rewrite it with --force if the recap matters"
+                f"  note: episode {', '.join(map(str, later))} was written from the old "
+                "summary and puzzle; rewrite it with --force if the recap matters"
             )
     print("Review the script.txt files before rendering audio.")
 

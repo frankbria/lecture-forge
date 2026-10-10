@@ -329,6 +329,24 @@ def episodes_to_write(
     return out
 
 
+def on_old_recap(
+    plan: dict, series_dir: Path, todo: list[tuple[dict, str, str]], ep: dict
+) -> list[int]:
+    """The later written episodes that writing ep leaves on an old summary and puzzle: the
+    ones up to the next episode this run (todo, from episodes_to_write) writes, which
+    lists the rest. A first write counts like a rewrite: a written episode after ep means
+    ep was written before and its script was lost. Empty when the run skips ep."""
+    written = [e["n"] for e, action, _ in todo if action != "skip"]
+    if ep["n"] not in written:
+        return []
+    stop = min((n for n in written if n > ep["n"]), default=float("inf"))
+    return [
+        e["n"]
+        for e in plan["episodes"]
+        if ep["n"] < e["n"] < stop and script_state(series_dir, plan, e) != "missing"
+    ]
+
+
 def write_episode(
     plan: dict, ep: dict, guide: StyleGuide, call: Call, series_dir: Path,
     *, on_progress: OnProgress = ignore,

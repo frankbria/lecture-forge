@@ -1,3 +1,4 @@
+import itertools
 import json
 import re
 import shutil
@@ -17,6 +18,7 @@ from lecture_forge.write import (
     episode_dir,
     episodes_to_write,
     fill_template,
+    on_old_recap,
     script_state,
     sections,
     stale_reason,
@@ -502,8 +504,9 @@ def test_write_one_episode_refuses_to_overwrite_without_force(project, capsys):
     assert "--force" in capsys.readouterr().err
     assert main(["write", "algebra", "--episode", "1", "--force", "--auto"]) == 0
     assert (
-        "episode 2" in capsys.readouterr().out.lower()
-    )  # warns later episodes may be stale
+        "note: episode 2 was written from the old summary and puzzle"
+        in capsys.readouterr().out
+    )
 
 
 @pytest.mark.parametrize(
@@ -755,6 +758,33 @@ def test_write_rewrites_an_episode_whose_range_changed(project, book, capsys):
     assert json.loads(meta.read_text(encoding="utf-8"))["start"] == 5
 
 
+def test_write_all_notes_a_later_episode_left_on_a_rewritten_ones_old_recap(
+    project, book, capsys
+):
+    root, calls = project
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    capsys.readouterr()
+    make_plan_file(root, book, [(1, [1, 2]), (2, [4, 6])])
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    out = capsys.readouterr().out
+    assert "note: episode 2 was written from the old summary and puzzle" in out
+    assert "Episode 2: Episode 2: already written, skipping" in out
+    assert len(calls) == 6  # only episode 1 is rewritten
+
+
+def test_write_all_notes_later_episodes_after_writing_a_lost_script_again(
+    project, capsys
+):
+    root, calls = project
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    capsys.readouterr()
+    (root / "series/algebra/episodes/01/script.txt").unlink()
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    out = capsys.readouterr().out
+    assert "note: episode 2 was written from the old summary and puzzle" in out
+    assert len(calls) == 6  # only episode 1 is written again
+
+
 def test_write_one_stale_episode_needs_no_force(project, book, capsys):
     root, calls = project
     assert main(["write", "algebra", "--all", "--auto"]) == 0
@@ -885,6 +915,74 @@ def test_episodes_to_write_says_why_a_stale_one_is_rewritten(tmp_path, book):
     plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 2]), (2, [4, 6])]))
     (ep, action, why), _ = episodes_to_write(plan, sdir, episode=None, force=False)
     assert ep["n"] == 1 and action == "rewrite" and "1-3" in why and "1-2" in why
+
+
+FOUR = [(1, [1, 2]), (2, [3, 4]), (3, [5, 5]), (4, [6, 6])]
+ALL = {"episode": None, "force": False}
+
+
+def _replanned(tmp_path, book, written, changed):
+    """(plan, series folder) after writing episodes `written` of FOUR and then changing
+    the `changed` ranges in the plan."""
+    replies = itertools.cycle([draft_reply(), critique_reply()])
+    for n in written:
+        run(tmp_path, book, lambda s, u, p: next(replies), n=n, episodes=FOUR)
+    episodes = [(n, changed.get(n, rng)) for n, rng in FOUR]
+    plan = load_plan(make_plan_file(tmp_path, book, episodes))
+    return plan, tmp_path / "series" / "algebra"
+
+
+def _left(plan, sdir, **kw):
+    todo = episodes_to_write(plan, sdir, **kw)
+    left = {ep["n"]: on_old_recap(plan, sdir, todo, ep) for ep, _, _ in todo}
+    return {n: later for n, later in left.items() if later}
+
+
+@pytest.mark.parametrize(
+    "changed, kw, expected",
+    [
+        ({1: [1, 1]}, ALL, {1: [2, 3, 4]}),
+        # episode 3 is rewritten in the same run: 1 doesn't list it, and it lists 4
+        ({1: [1, 1], 3: [4, 5]}, ALL, {1: [2], 3: [4]}),
+        # a moved boundary makes two neighbours stale: episode 3 is listed once, under 2
+        ({1: [1, 1], 2: [2, 4], 4: [5, 6]}, ALL, {2: [3]}),
+        ({}, {"episode": None, "force": True}, {}),
+        # --episode rewrites nothing else: a stale later episode is listed too
+        ({3: [4, 5]}, {"episode": 1, "force": True}, {1: [2, 3, 4]}),
+        ({}, {"episode": 2, "force": True}, {2: [3, 4]}),
+    ],
+)
+def test_on_old_recap_lists_later_written_episodes_this_run_leaves(
+    tmp_path, book, changed, kw, expected
+):
+    """All four episodes are written, then the plan changes the `changed` ranges."""
+    plan, sdir = _replanned(tmp_path, book, (1, 2, 3, 4), changed)
+    assert _left(plan, sdir, **kw) == expected
+
+
+def test_on_old_recap_counts_a_lost_script_written_again_like_a_rewrite(tmp_path, book):
+    """Episode 1 is stale and episode 2's script is gone (an interrupted rewrite, or a
+    deleted folder), so 2 is a "write": it lists 3 and 4, and nothing lists it."""
+    plan, sdir = _replanned(tmp_path, book, (1, 2, 3, 4), {1: [1, 1]})
+    (episode_dir(sdir, 2) / "script.txt").unlink()
+    todo = episodes_to_write(plan, sdir, **ALL)
+    assert [action for _, action, _ in todo] == ["rewrite", "write", "skip", "skip"]
+    assert _left(plan, sdir, **ALL) == {2: [3, 4]}
+    assert _left(plan, sdir, episode=1, force=False) == {1: [3, 4]}
+    assert _left(plan, sdir, episode=2, force=False) == {2: [3, 4]}
+
+
+def test_on_old_recap_leaves_out_an_episode_the_run_wrote_for_the_first_time(
+    tmp_path, book
+):
+    """Asked after the run, as a GUI may: episode 4 is written by then, from the new recap."""
+    plan, sdir = _replanned(tmp_path, book, (1, 2, 3), {3: [4, 5]})
+    todo = episodes_to_write(plan, sdir, **ALL)
+    assert [action for _, action, _ in todo] == ["skip", "skip", "rewrite", "write"]
+    replies = itertools.cycle([draft_reply(), critique_reply()])
+    for ep in plan["episodes"][2:]:
+        write_episode(plan, ep, GUIDE, lambda s, u, p: next(replies), sdir)
+    assert on_old_recap(plan, sdir, todo, plan["episodes"][2]) == []
 
 
 def test_write_episode_reports_each_pass_and_repair(tmp_path, book):
