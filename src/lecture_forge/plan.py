@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -172,6 +173,18 @@ def make_plan(src: Source, guide: StyleGuide, start: int, end: int, call: Call) 
                 "Return a corrected JSON object only.\n- " + "\n- ".join(errors)
             )
     raise PlanError("the planner's plan is still invalid: " + "; ".join(errors))
+
+
+SLUG = re.compile(r"[a-z0-9][a-z0-9_-]*")  # a folder name: no paths, no surprises
+
+
+def series_dir(root: str | Path, slug: str) -> Path:
+    """Where a series lives in the project at `root`; the slug becomes a folder name."""
+    if not SLUG.fullmatch(slug):
+        raise ValueError(
+            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
+        )
+    return Path(root) / "series" / slug
 
 
 def save(path: Path, text: str) -> None:

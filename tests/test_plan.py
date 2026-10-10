@@ -413,3 +413,38 @@ def test_plan_command_notes_scanned_pages_in_its_range(
     out = capsys.readouterr().out
     assert "note: 2 of 3 pages are scans (page images)" in out
     assert "page 3: scanned page image, words not counted" in prompts[0]
+
+
+def test_series_live_under_the_project_root(tmp_path):
+    from lecture_forge.plan import series_dir
+
+    assert series_dir(tmp_path, "algebra-1") == tmp_path / "series" / "algebra-1"
+    for bad in ("../etc", "Algebra", "a/b", ""):
+        with pytest.raises(ValueError, match="lowercase letters"):
+            series_dir(tmp_path, bad)
+
+
+def test_the_engine_runs_on_a_project_root_from_another_folder(
+    tmp_path, monkeypatch, book
+):
+    """A GUI server started anywhere: settings, style guide and series all come from root."""
+    from lecture_forge.plan import series_dir
+    from lecture_forge.style_guide import load_style_guide
+
+    root = tmp_path / "project"
+    (root / "prompts").mkdir(parents=True)
+    (root / "prompts" / "style-guide.md").write_text(
+        "## Part 1\nS\n## Part 2\nC\n## Part 3\n```\nSOURCE MATERIAL:\n```\n"
+    )
+    (root / ".env").write_text("LECTURE_FORGE_PROVIDER=anthropic\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("STYLE_GUIDE_PATH", raising=False)
+    settings = load_settings(root=root)
+    guide = load_style_guide(settings.style_guide_path)  # the default, under root
+    plan = make_plan(book, guide, 1, 6, lambda s, u, p: plan_json(episode(1, 6)))
+    out = series_dir(root, "algebra") / "plan.yaml"
+    write_plan(plan, book, out)
+    assert out.is_file() and settings.provider == "anthropic"
+    assert not list(elsewhere.iterdir())  # nothing written where the program runs
