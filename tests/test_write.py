@@ -810,3 +810,50 @@ def test_rule_line_in_the_middle_of_the_draft_gets_a_repair_round(tmp_path, book
     run(tmp_path, book, call)
     assert len(prompts) == 3 and "rule line" in prompts[1]
     assert "SCRIPT TO REVIEW" in prompts[2]  # the critique saw the repaired draft
+
+
+@pytest.mark.parametrize("after,repaired", [(140, False), (160, True)])
+def test_up_to_150_words_after_a_rule_are_cut_silently(tmp_path, book, after, repaired):
+    """The threshold is flat: 10% of a 4,000-word lecture would be minutes of it."""
+    long = SCRIPT * 5  # ~3,600 words, like a real episode
+    tail = " ".join(["word"] * after)
+    replies = iter([draft_reply(script=long), critique_reply(script=f"{long}\n---\n{tail}"),
+                    critique_reply(script=long)])  # fmt: skip
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert (len(prompts) == 3) is repaired
+    if repaired:
+        assert f"with {after} words after it" in prompts[2]
+        assert "keep the spoken script after it" in prompts[2]
+
+
+def test_a_revision_starting_with_a_rule_names_the_rule(tmp_path, book):
+    replies = iter(
+        [draft_reply(), critique_reply(script=f"---\n{SCRIPT}"), critique_reply()]
+    )
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert "rule line" in prompts[2] and "missing or empty" not in prompts[2]
+
+
+def test_a_rule_and_an_empty_section_are_repaired_together(tmp_path, book):
+    split = critique_reply(script=SCRIPT + "\n\n---\n\n" + SCRIPT, puzzle="")
+    replies = iter([draft_reply(), split, critique_reply()])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert "rule line" in prompts[2] and "PUZZLE ANSWER section is empty" in prompts[2]

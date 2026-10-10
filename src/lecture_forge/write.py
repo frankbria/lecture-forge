@@ -63,23 +63,30 @@ class Written:
 _RULE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
 
 
+def _first_rule(lines: list[str]) -> int:
+    """Index of the first markdown rule line (---, ***, ___), or len(lines) if none."""
+    return next((i for i, line in enumerate(lines) if _RULE.match(line)), len(lines))
+
+
 def _spoken(script: str) -> str:
     """The script up to any markdown rule line (---, ***). Models put remarks after one, and
     anything left in script.txt is read aloud. The style guide bans markdown in scripts."""
     lines = script.splitlines()
-    cut = next((i for i, line in enumerate(lines) if _RULE.match(line)), len(lines))
-    return "\n".join(lines[:cut]).strip()
+    return "\n".join(lines[: _first_rule(lines)]).strip()
 
 
 def _cut_problem(name: str, text: str) -> str | None:
     """A rule line with more after it than a remark: a scene break would silently drop the
     rest of the lecture, so it goes back for repair instead."""
-    words = len(text.split())
-    dropped = words - len(_spoken(text).split())
-    if dropped > max(150, words // 10):  # a trailing remark (~30 words) is cut silently
+    lines = text.splitlines()
+    dropped = len(" ".join(lines[_first_rule(lines) + 1 :]).split())
+    # Flat: a trailing remark (~30 words in the real incident) is cut silently, but even
+    # 10% of a 4,000-word lecture would be minutes of it.
+    if dropped > 150:
         return (
             f"the {name} has a markdown rule line (---, ***, ___) with {dropped} words after "
-            "it; anything after a rule line is dropped, so remove rule lines from the script"
+            "it, which would be dropped: remove the rule line, keep the spoken script after "
+            "it, and leave out anything that isn't spoken script (remarks, notes, sources)"
         )
     return None
 
@@ -224,19 +231,21 @@ def _check_draft(found: dict[str, str]) -> list[str]:
 
 
 def _check_critique(found: dict[str, str], draft: str) -> list[str]:
-    revised = _spoken(found.get("Revised script", ""))
-    if not revised:
+    raw = found.get("Revised script", "")
+    cut = _cut_problem(
+        "revised script", raw
+    )  # first: a leading rule empties the script
+    if not cut and not _spoken(raw):
         return ["the Revised script section is missing or empty"]
-    if cut := _cut_problem("revised script", found["Revised script"]):
-        return [cut]
-    if empty := [
-        n for n in ("PUZZLE ANSWER", "EPISODE SUMMARY") if n in found and not found[n]
-    ]:
-        return [
-            f"the {n} section is empty; give it, or leave the heading out"
-            for n in empty
-        ]
-    have, want = len(revised.split()), len(draft.split())
+    problems = [cut] if cut else []
+    problems += [
+        f"the {n} section is empty; give it, or leave the heading out"
+        for n in ("PUZZLE ANSWER", "EPISODE SUMMARY")
+        if n in found and not found[n]
+    ]
+    if problems:  # all at once: there is only one repair round
+        return problems
+    have, want = len(_spoken(raw).split()), len(draft.split())
     if have < want / 2:  # a summary or a cut-off reply, not a revision
         return [
             (
