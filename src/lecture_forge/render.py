@@ -287,7 +287,8 @@ def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
         listing = Path(td) / "pieces.txt"
         quoted = (str(f.resolve()).replace("'", "'\\''") for f in files)
         listing.write_text("".join(f"file '{q}'\n" for q in quoted), encoding="utf-8")
-        cmd = ["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
+        # -xerror: without it a corrupt piece after a good one exits 0 with a truncated file.
+        cmd = ["ffmpeg", "-loglevel", "error", "-xerror", "-y", "-f", "concat", "-safe", "0",
                "-i", str(listing), "-c", "copy", "-map_metadata", "-1", "-id3v2_version", "3"]  # fmt: skip
         for k, v in tags.items():
             cmd += ["-metadata", f"{k}={v}"]

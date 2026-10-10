@@ -692,9 +692,25 @@ def test_missing_ffmpeg_fails_before_any_paid_request(
     assert not (tmp_path / "Lectures").exists()  # no empty album folder in Dropbox
 
 
-def test_ffmpeg_failure_leaves_no_partial_or_published_file(series, tmp_path):
+class CorruptAfter(FakeTTS):
+    """Real audio for the first piece, then bytes that aren't audio (a corrupt piece)."""
+
+    def __call__(self, text, previous_ids):
+        audio, rid = super().__call__(text, previous_ids)
+        return (audio if len(self.calls) == 1 else b"not audio at all"), rid
+
+
+@pytest.mark.parametrize("corrupt", ["every piece", "after the first"])
+def test_ffmpeg_failure_leaves_no_partial_or_published_file(
+    series, tmp_path, beep, corrupt
+):
+    """ffmpeg exits 0 after a good piece and a bad one, writing only the good part: that
+    truncated episode must never be published."""
+    tts = (
+        FakeTTS(b"not audio at all") if corrupt == "every piece" else CorruptAfter(beep)
+    )
     with pytest.raises(RenderError, match="ffmpeg failed"):
-        run(series, tmp_path, FakeTTS(b"not audio at all"))
+        run(series, tmp_path, tts)
     out = tmp_path / "Lectures"
     assert not list(out.rglob("*.mp3")) and not list(out.rglob("*.part"))
     assert not (episode_dir(series, 1) / "render.json").exists()
