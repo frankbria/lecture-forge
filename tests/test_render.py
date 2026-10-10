@@ -676,3 +676,54 @@ def test_render_all_measures_each_episode_between_its_own_balance_reads(
     assert main(["render", "algebra", "--all", "--yes"]) == 0
     sdir = root / "series" / "algebra"
     assert [marker(sdir, n)["credits_used"] for n in (1, 2)] == [1000, 500]
+
+
+# --- failure paths on the money path (#28) ------------------------------------------------
+
+
+def test_missing_ffmpeg_fails_before_any_paid_request(
+    series, tmp_path, beep, monkeypatch
+):
+    monkeypatch.setenv("PATH", "")
+    tts = FakeTTS(beep)
+    with pytest.raises(RenderError, match="ffmpeg"):
+        run(series, tmp_path, tts)
+    assert tts.calls == []  # nothing paid for
+    assert not (tmp_path / "Lectures").exists()  # no empty album folder in Dropbox
+
+
+def test_ffmpeg_failure_leaves_no_partial_or_published_file(series, tmp_path):
+    with pytest.raises(RenderError, match="ffmpeg failed"):
+        run(series, tmp_path, FakeTTS(b"not audio at all"))
+    out = tmp_path / "Lectures"
+    assert not list(out.rglob("*.mp3")) and not list(out.rglob("*.part"))
+    assert not (episode_dir(series, 1) / "render.json").exists()
+
+
+def test_network_error_is_retried_then_succeeds():
+    import httpx
+
+    replies = [httpx.ConnectError("boom"), (b"x", "req-1")]
+
+    def convert(**kw):
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    delays = []
+    tts = r.elevenlabs_tts(
+        settings_obj(), convert=convert, sleep=delays.append, attempts=3
+    )
+    assert tts("hi", []) == (b"x", "req-1") and delays == [10]
+
+
+def test_rendering_twice_spends_nothing_the_second_time(project, capsys):
+    _, tts = project
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    paid = len(tts.calls)
+    capsys.readouterr()
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert len(tts.calls) == paid and paid > 0
+    assert "already rendered" in out and "0 characters to synthesize" in out

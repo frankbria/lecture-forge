@@ -282,8 +282,6 @@ def cost(
 
 def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
     """Concatenate the pieces and tag them; publish atomically so Dropbox never syncs a half file."""
-    if shutil.which("ffmpeg") is None:
-        raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
     tmp = out.with_name(f".{out.name}.part")
     with tempfile.TemporaryDirectory() as td:
         listing = Path(td) / "pieces.txt"
@@ -317,6 +315,9 @@ def render_episode(
     script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings)
     if up_to_date and not force:
         return Rendered(out, 0, 0, True)
+    # Before any folder or paid request: a machine without ffmpeg can't finish the episode.
+    if shutil.which("ffmpeg") is None:
+        raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
     # Folders only now, after the skip check: a cost preview or a skip creates nothing.
     out.parent.parent.mkdir(exist_ok=True)  # the output dir; its parent was checked
     out.parent.mkdir(exist_ok=True)
