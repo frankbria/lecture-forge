@@ -1,5 +1,6 @@
 """Write one episode: a script pass (style guide Part 1), then a critique pass (Part 2)."""
 
+import dataclasses
 import json
 import re
 import tempfile
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lecture_forge.plan import Call, save
+from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.source import extract_text, slice_pdf
 from lecture_forge.style_guide import StyleGuide
 
@@ -204,10 +206,12 @@ def fill_template(template: str, **values: str) -> str:
 def _ask(
     call: Call, system: str, user: str, pdf: Path | None, names: list[str],
     check: Callable[[dict[str, str]], list[str]], strict=(),
+    *, stage: str, on_progress: OnProgress,
 ) -> tuple[str, dict[str, str]]:  # fmt: skip
     """One call, checked; one repair round with the problems listed, then WriteError."""
     prompt = user
-    for _ in range(2):
+    for attempt in range(2):
+        on_progress(Progress(stage, note="repair round" if attempt else ""))
         text = call(system, prompt, pdf)
         found = sections(text, names, strict)
         if not (problems := check(found)):
@@ -326,10 +330,15 @@ def episodes_to_write(
 
 
 def write_episode(
-    plan: dict, ep: dict, guide: StyleGuide, call: Call, series_dir: Path
-) -> Written:
+    plan: dict, ep: dict, guide: StyleGuide, call: Call, series_dir: Path,
+    *, on_progress: OnProgress = ignore,
+) -> Written:  # fmt: skip
     """Draft, critique and save one episode. script.txt is written last: it marks done."""
     prev = _previous(plan, ep, series_dir)
+
+    def report(event: Progress) -> None:
+        on_progress(dataclasses.replace(event, episode=ep["n"]))
+
     src, unit, start, end = plan["source"], plan["unit"], ep["start"], ep["end"]
     by = f", {plan['author']}" if plan["author"] else ""
     series = (
@@ -357,6 +366,8 @@ def write_episode(
             pdf,
             DRAFT_SECTIONS,
             _check_draft,
+            stage="draft",
+            on_progress=report,
         )
         d.mkdir(parents=True, exist_ok=True)
         save(d / "draft.md", draft_text)  # kept even if the critique fails
@@ -372,6 +383,8 @@ def write_episode(
             lambda found: _check_critique(found, draft["SCRIPT"]),
             # "Episode summary: ..." in commentary or the spoken text is no heading
             strict=("EPISODE SUMMARY",),
+            stage="critique",
+            on_progress=report,
         )
     script = _spoken(crit["Revised script"])
     # A rewrite is "not done" while its files change, so an interrupted rewrite can never
