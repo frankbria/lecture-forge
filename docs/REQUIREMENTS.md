@@ -137,5 +137,5 @@ Credits and per-use API charges are spent **only when they have to be**. Each ki
 4. **M4:** `write` (script pass, critique pass, episode-to-episode state).
 5. **M5:** `render` (ElevenLabs, chunking, ffmpeg, ID3, idempotency).
 6. **M6:** `run --auto`; end-to-end test on a real chapter.
-7. **Later:** a GUI over the same engine (see Goals). Prerequisites: [#32](https://github.com/frankbria/lecture-forge/issues/32) moves the remaining decisions out of the CLI, and its companion issues add an explicit project root, progress callbacks, and the `run` chain to the engine.
+7. **Later:** a GUI over the same engine (see Goals). Prerequisites: [#32](https://github.com/frankbria/lecture-forge/issues/32) moves the remaining decisions out of the CLI, and its companion issues add an explicit project root ([#58](https://github.com/frankbria/lecture-forge/issues/58)), progress callbacks ([#59](https://github.com/frankbria/lecture-forge/issues/59)) and the `run` chain ([#60](https://github.com/frankbria/lecture-forge/issues/60)) to the engine.
 8. **Later:** custom pronunciation. Turn the pronunciation hints in each episode's production notes into an ElevenLabs pronunciation dictionary, applied at render time. *Deferred: tracked in [#1](https://github.com/frankbria/lecture-forge/issues/1).*
