@@ -11,6 +11,7 @@ from lecture_forge.plan import (
     PlanError,
     load_plan,
     make_plan,
+    reusable_plan,
     series_dir,
     write_plan,
 )
@@ -242,12 +243,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     settings = load_settings(root=ROOT)
     settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
     settings.require("voice_id")
-    if plan_path.exists():
-        planned = load_plan(plan_path, root=ROOT)["source"].path.resolve()
-        if planned != Path(args.source).resolve():
-            raise ValueError(
-                f"{plan_path} is a plan for {planned}; use another --series for {args.source}"
-            )
+    if reusable_plan(plan_path, args.source, root=ROOT) is not None:
         print(f"Using the existing {plan_path} (delete it to plan again)")
     else:
         cmd_plan(argparse.Namespace(
