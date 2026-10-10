@@ -1,3 +1,8 @@
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 from test_source import scanned_pdf
 
 from lecture_forge.cli import main
@@ -40,3 +45,14 @@ def test_outline_notes_scanned_pages(tmp_path, capsys):
     assert "nothing is OCR'd" in out
     main(["outline", str(scanned_pdf(tmp_path / "text.pdf", "tb"))])
     assert "note:" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["lecture-forge", "lforge"])
+def test_each_command_name_runs_and_shows_itself(name):
+    exe = Path(sys.executable).parent / name
+    usage = subprocess.run([exe, "--help"], capture_output=True, text=True, check=False)
+    assert usage.returncode == 0
+    assert usage.stdout.startswith(f"usage: {name} ")
+    bad = subprocess.run([exe, "nonsense"], capture_output=True, text=True, check=False)
+    assert bad.returncode == 2
+    assert f"{name}: error:" in bad.stderr

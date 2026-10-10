@@ -123,7 +123,7 @@ Credits and per-use API charges are spent **only when they have to be**. Each ki
 
 ## Stack
 
-- Python 3.12, `uv`, argparse (CLI), PyYAML, pymupdf (slicing and text extraction), anthropic, openai, elevenlabs, ffmpeg (join and ID3 tags).
+- Python 3.12, `uv`, argparse (CLI, installed as `lecture-forge` and the short alias `lforge`), PyYAML, pymupdf (slicing and text extraction), anthropic, openai, elevenlabs, ffmpeg (join and ID3 tags).
 - Tests: pytest. Integration tests call the real providers and are marked so they can be skipped when no key is set.
 
 ## Decisions
