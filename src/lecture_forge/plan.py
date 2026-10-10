@@ -311,3 +311,19 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
         "unit": unit,
         "episodes": sorted(episodes, key=lambda e: e["n"]),
     }
+
+
+def reusable_plan(
+    path: Path, source: str | Path, *, root: str | Path = "."
+) -> dict | None:
+    """The plan at `path` if it was made for `source`, None if there is no plan yet. A plan
+    for another source is refused, so a series is never written from the wrong book."""
+    if not Path(path).exists():
+        return None
+    plan = load_plan(path, root=root)
+    planned = plan["source"].path.resolve()
+    if planned != (Path(root) / Path(source).expanduser()).resolve():
+        raise ValueError(
+            f"{path} is a plan for {planned}; use another --series for {source}"
+        )
+    return plan

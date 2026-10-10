@@ -486,3 +486,33 @@ def test_make_plan_reports_progress_before_each_call(book):
         book, GUIDE, 1, 6, lambda s, u, p: next(replies), on_progress=events.append
     )
     assert events == [Progress("plan"), Progress("plan", note="repair round")]
+
+
+def test_reusable_plan_is_the_existing_plan_only_for_the_same_source(tmp_path, book):
+    from lecture_forge.plan import reusable_plan
+
+    out = tmp_path / "series" / "s" / "plan.yaml"
+    assert reusable_plan(out, book.path, root=tmp_path) is None  # nothing planned yet
+    write_plan(make_plan(book, GUIDE, 1, 6, lambda s, u, p: plan_json(episode(1, 6))),
+               book, out)  # fmt: skip
+    plan = reusable_plan(out, book.path, root=tmp_path)
+    assert plan["source"].path == book.path.resolve()
+    other = tmp_path / "other.md"
+    other.write_text("x\n")
+    with pytest.raises(ValueError, match="is a plan for .*use another --series for"):
+        reusable_plan(out, other, root=tmp_path)
+
+
+def test_reusable_plan_resolves_a_relative_source_under_the_root(
+    tmp_path, monkeypatch, book
+):
+    from lecture_forge.plan import reusable_plan
+
+    root = tmp_path / "project"
+    out = root / "series" / "s" / "plan.yaml"
+    shutil.copy(book.path, root.mkdir() or root / "book.pdf")
+    src = open_source(root / "book.pdf")
+    write_plan(make_plan(src, GUIDE, 1, 6, lambda s, u, p: plan_json(episode(1, 6))),
+               src, out)  # fmt: skip
+    monkeypatch.chdir(tmp_path)  # not the root
+    assert reusable_plan(out, "book.pdf", root=root) is not None
