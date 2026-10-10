@@ -4,6 +4,7 @@ Every provider sees the real PDF pages (no text extraction), so equations surviv
 """
 
 import base64
+import dataclasses
 import json
 import logging
 import os
@@ -288,3 +289,33 @@ def complete(
                 "%s; retrying in %.0fs (%d/%d)", e, delay, attempt + 1, attempts - 1
             )
             sleep(delay)
+
+
+def complete_switching(
+    settings: Settings,
+    system: str,
+    user: str,
+    pdf: Path | None = None,
+    *,
+    choose: Callable[[ProviderError], str | None] | None = None,
+    on_note: Callable[[str], None] = lambda _: None,
+) -> tuple[str, Settings]:
+    """complete() on settings.provider; once retries run out, `choose` may name one of the
+    error's alternatives to switch to (None, or anything else, gives up).
+
+    Returns (text, settings to use from now on). After a switch those settings name the
+    new provider and drop the old provider's model override, so later calls stay on it.
+    """
+    while True:
+        try:
+            text = complete(settings.provider, system, user, pdf, settings=settings)
+            return text, settings
+        except ProviderError as e:
+            choice = choose(e) if choose and e.alternatives else None
+            if choice not in e.alternatives:
+                raise
+            if settings.llm_model:  # a model override names the old provider's model
+                on_note(
+                    f"note: ignoring LECTURE_FORGE_LLM_MODEL={settings.llm_model} for {choice}"
+                )
+            settings = dataclasses.replace(settings, provider=choice, llm_model="")

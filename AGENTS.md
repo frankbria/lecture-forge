@@ -22,20 +22,21 @@ uv run ruff format --check .
 
 ## Layout
 
-- `cli.py`: argparse commands (`outline`, `plan`, `write`, `render`, `run`)
+- `cli.py`: argparse commands (`outline`, `plan`, `write`, `render`, `run`). A front end only: it formats, prints and prompts. Decisions belong in the engine modules below, so a GUI can call them too (REQUIREMENTS, Goals).
 - `config.py`: settings from `.env`, overridden by the environment
 - `source.py`: PDF/text loading, outline, PDF slicing
 - `style_guide.py`: splits the owner's style guide into its parts
-- `providers.py`: LLM providers (claude-code, anthropic, openai) and the retry policy
+- `providers.py`: LLM providers (claude-code, anthropic, openai), the retry policy, and provider switching (`complete_switching`, with a `choose` callback)
 - `plan.py`: episode planning and `plan.yaml` validation
-- `write.py`: script and critique passes, episode continuity
-- `render.py`: ElevenLabs TTS, piece cache, ffmpeg join and tags
+- `write.py`: script and critique passes, episode continuity, which episodes to write (`episodes_to_write`)
+- `render.py`: ElevenLabs TTS, piece cache, ffmpeg join and tags, the render cost and balance gate (`preflight`, `Preflight.check`)
 
 ## Conventions
 
 - Minimal code; no speculative abstractions.
 - Tests use real files and real ffmpeg with small fakes (`FakeTTS` in `tests/test_render.py`), never mocked SDK clients.
 - `# fmt: skip` keeps compact multi-argument calls on one line.
+- The engine never prints or prompts: it returns data, raises domain exceptions, or takes callbacks.
 - Errors are domain exceptions (`PlanError`, `WriteError`, `RenderError`, `ProviderError`, `ConfigError`) that `cli.main` prints as `error: …`.
 
 ## Read before working

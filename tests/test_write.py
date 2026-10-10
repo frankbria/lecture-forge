@@ -15,6 +15,7 @@ from lecture_forge.style_guide import StyleGuide, load_style_guide
 from lecture_forge.write import (
     WriteError,
     episode_dir,
+    episodes_to_write,
     fill_template,
     script_state,
     sections,
@@ -857,3 +858,30 @@ def test_a_rule_and_an_empty_section_are_repaired_together(tmp_path, book):
 
     run(tmp_path, book, call)
     assert "rule line" in prompts[2] and "PUZZLE ANSWER section is empty" in prompts[2]
+
+
+# --- the write decision in the engine (#32) ------------------------------------------------
+
+
+def test_episodes_to_write_decides_write_rewrite_and_skip(tmp_path, book):
+    replies = iter([draft_reply(), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))  # episode 1 written
+    sdir = tmp_path / "series" / "algebra"
+    plan = load_plan(sdir / "plan.yaml")
+    todo = episodes_to_write(plan, sdir, episode=None, force=False)
+    assert [(ep["n"], action) for ep, action, _ in todo] == [(1, "skip"), (2, "write")]
+    forced = episodes_to_write(plan, sdir, episode=None, force=True)
+    assert [action for _, action, _ in forced] == ["rewrite", "write"]
+    with pytest.raises(FileExistsError, match="episode 1 is already written"):
+        episodes_to_write(plan, sdir, episode=1, force=False)
+    with pytest.raises(ValueError, match="no episode 7"):
+        episodes_to_write(plan, sdir, episode=7, force=False)
+
+
+def test_episodes_to_write_says_why_a_stale_one_is_rewritten(tmp_path, book):
+    replies = iter([draft_reply(), critique_reply()])
+    run(tmp_path, book, lambda s, u, p: next(replies))
+    sdir = tmp_path / "series" / "algebra"
+    plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 2]), (2, [4, 6])]))
+    (ep, action, why), _ = episodes_to_write(plan, sdir, episode=None, force=False)
+    assert ep["n"] == 1 and action == "rewrite" and "1-3" in why and "1-2" in why
