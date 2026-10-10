@@ -332,20 +332,18 @@ def episodes_to_write(
 def on_old_recap(
     plan: dict, series_dir: Path, todo: list[tuple[dict, str, str]], ep: dict
 ) -> list[int]:
-    """The later written episodes that rewriting ep leaves on an old summary and puzzle:
-    the ones this run (todo, from episodes_to_write) doesn't write again. Each is listed
-    once in a run, under the last rewrite before it. Empty unless ep is rewritten."""
-    actions = {e["n"]: action for e, action, _ in todo}
-    if actions.get(ep["n"]) != "rewrite":
+    """The later written episodes that writing ep leaves on an old summary and puzzle: the
+    ones up to the next episode this run (todo, from episodes_to_write) writes, which
+    lists the rest. A first write counts like a rewrite: a written episode after ep means
+    ep was written before and its script was lost. Empty when the run skips ep."""
+    written = [e["n"] for e, action, _ in todo if action != "skip"]
+    if ep["n"] not in written:
         return []
-    rewrites = [n for n, action in actions.items() if action == "rewrite"]
-    stop = min((n for n in rewrites if n > ep["n"]), default=float("inf"))
+    stop = min((n for n in written if n > ep["n"]), default=float("inf"))
     return [
         e["n"]
         for e in plan["episodes"]
-        if ep["n"] < e["n"] < stop
-        and actions.get(e["n"], "skip") == "skip"
-        and script_state(series_dir, plan, e) != "missing"
+        if ep["n"] < e["n"] < stop and script_state(series_dir, plan, e) != "missing"
     ]
 
 
