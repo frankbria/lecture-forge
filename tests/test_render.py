@@ -460,12 +460,11 @@ def test_torn_render_marker_is_rebuilt_from_cache(series, tmp_path, beep, torn, 
     marker = episode_dir(series, 1) / "render.json"
     marker.write_bytes(torn)  # last case: re-saved as UTF-16 by an editor
     plan = load_plan(series / "plan.yaml")
-    r.cost(plan, plan["episodes"][0], series, settings(tmp_path))  # the cost preview
+    r.cost(plan, plan["episodes"][0], series, settings(tmp_path))
+    assert not caplog.messages  # the cost preview rebuilds nothing, so it says nothing
     result = run(series, tmp_path, FakeTTS(beep))
     assert not result.skipped and result.billed == 0 and result.path.is_file()
-    assert [m for m in caplog.messages if "unreadable" in m] == [
-        f"{marker} is unreadable; rebuilding from cached pieces"
-    ]  # once per render, not once more from the preview
+    assert caplog.messages == [f"{marker} is unreadable; rebuilding from cached pieces"]
     assert json.loads(marker.read_text(encoding="utf-8"))["model"] == "eleven_v3"
 
 
