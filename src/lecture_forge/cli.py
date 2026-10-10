@@ -132,7 +132,7 @@ def cmd_write(args: argparse.Namespace) -> None:
         raise FileNotFoundError(
             f"{plan_path} not found; run `lecture-forge plan` first"
         )
-    plan = load_plan(plan_path)
+    plan = load_plan(plan_path, root=ROOT)
 
     def state(ep: dict) -> str:
         return script_state(series_dir, plan, ep)
@@ -184,7 +184,7 @@ def cmd_render(args: argparse.Namespace) -> None:
         raise FileNotFoundError(
             f"{plan_path} not found; run `lecture-forge plan` first"
         )
-    plan = load_plan(plan_path)
+    plan = load_plan(plan_path, root=ROOT)
     settings = load_settings(root=ROOT)
     settings.require("elevenlabs_api_key")
     settings.require("voice_id")
@@ -243,7 +243,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
     settings.require("voice_id")
     if plan_path.exists():
-        planned = load_plan(plan_path)["source"].path.resolve()
+        planned = load_plan(plan_path, root=ROOT)["source"].path.resolve()
         if planned != Path(args.source).resolve():
             raise ValueError(
                 f"{plan_path} is a plan for {planned}; use another --series for {args.source}"

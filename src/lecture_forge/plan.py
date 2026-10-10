@@ -234,7 +234,7 @@ def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> P
     return path
 
 
-def load_plan(path: Path) -> dict:
+def load_plan(path: Path, *, root: str | Path = ".") -> dict:
     """Read a (possibly hand-edited) plan.yaml, checking everything `write` relies on.
 
     Returns {title, author, source: Source, unit, episodes: [{n, title, central_idea,
@@ -252,7 +252,9 @@ def load_plan(path: Path) -> dict:
             f"{path}: source is missing; it must be the path of the book or notes"
         )
     try:
-        src = open_source(source)
+        # A relative source (a hand edit) is under the project root, never wherever the
+        # program runs; plan writes absolute paths, which stay as they are.
+        src = open_source(Path(root) / Path(source).expanduser())
     except (FileNotFoundError, ValueError) as e:
         raise PlanError(
             f"{path}: source {data.get('source')!r} can't be opened ({e})"
