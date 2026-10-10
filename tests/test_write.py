@@ -913,6 +913,8 @@ FOUR = [(1, [1, 2]), (2, [3, 4]), (3, [5, 5]), (4, [6, 6])]
         ({1: [1, 1]}, {"episode": None, "force": False}, {1: [2, 3]}),
         # episode 3 is rewritten in the same run, so it isn't left on an old recap
         ({1: [1, 1], 3: [4, 5]}, {"episode": None, "force": False}, {1: [2]}),
+        # a moved boundary makes two neighbours stale: episode 3 is listed once, under 2
+        ({1: [1, 1], 2: [2, 4]}, {"episode": None, "force": False}, {2: [3]}),
         ({}, {"episode": None, "force": True}, {}),
         # --episode rewrites nothing else: a stale later episode is listed too
         ({3: [4, 5]}, {"episode": 1, "force": True}, {1: [2, 3]}),
@@ -932,6 +934,36 @@ def test_on_old_recap_lists_later_written_episodes_this_run_leaves(
     todo = episodes_to_write(plan, sdir, **kw)
     left = {ep["n"]: on_old_recap(plan, sdir, todo, ep) for ep, _, _ in todo}
     assert {n: later for n, later in left.items() if later} == expected
+
+
+def test_on_old_recap_leaves_out_an_episode_the_run_wrote_for_the_first_time(
+    tmp_path, book
+):
+    """Asked after the run, as a GUI may: episode 4 is written by then, from the new recap."""
+    replies = itertools.cycle([draft_reply(), critique_reply()])
+    for n in (1, 2, 3):
+        run(tmp_path, book, lambda s, u, p: next(replies), n=n, episodes=FOUR)
+    sdir = tmp_path / "series" / "algebra"
+    changed = [*FOUR[:2], (3, [4, 5]), FOUR[3]]
+    plan = load_plan(make_plan_file(tmp_path, book, changed))
+    todo = episodes_to_write(plan, sdir, episode=None, force=False)
+    assert [action for _, action, _ in todo] == ["skip", "skip", "rewrite", "write"]
+    for n in (3, 4):
+        run(tmp_path, book, lambda s, u, p: next(replies), n=n, episodes=changed)
+    assert on_old_recap(plan, sdir, todo, plan["episodes"][2]) == []
+
+
+def test_on_old_recap_follows_a_rewrite_not_a_first_write(tmp_path, book):
+    """Episode 1's script is gone, so it is written, not rewritten: no note for episode 2."""
+    replies = itertools.cycle([draft_reply(), critique_reply()])
+    for n in (1, 2):
+        run(tmp_path, book, lambda s, u, p: next(replies), n=n)
+    sdir = tmp_path / "series" / "algebra"
+    (episode_dir(sdir, 1) / "script.txt").unlink()
+    plan = load_plan(sdir / "plan.yaml")
+    todo = episodes_to_write(plan, sdir, episode=None, force=False)
+    assert [action for _, action, _ in todo] == ["write", "skip"]
+    assert on_old_recap(plan, sdir, todo, plan["episodes"][0]) == []
 
 
 def test_write_episode_reports_each_pass_and_repair(tmp_path, book):
