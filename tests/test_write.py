@@ -885,3 +885,17 @@ def test_episodes_to_write_says_why_a_stale_one_is_rewritten(tmp_path, book):
     plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 2]), (2, [4, 6])]))
     (ep, action, why), _ = episodes_to_write(plan, sdir, episode=None, force=False)
     assert ep["n"] == 1 and action == "rewrite" and "1-3" in why and "1-2" in why
+
+
+def test_write_episode_reports_each_pass_and_repair(tmp_path, book):
+    from lecture_forge.progress import Progress
+
+    events = []
+    replies = iter(["**SCRIPT**\nonly a script", draft_reply(), critique_reply()])
+    plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 3]), (2, [4, 6])]))
+    ep = plan["episodes"][0]
+    write_episode(plan, ep, GUIDE, lambda s, u, p: next(replies),
+                  tmp_path / "series" / "algebra", on_progress=events.append)  # fmt: skip
+    assert events == [
+        Progress("draft"), Progress("draft", note="repair round"), Progress("critique")
+    ]  # fmt: skip

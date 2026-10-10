@@ -27,7 +27,8 @@ uv run ruff format --check .
 - `source.py`: PDF/text loading, outline, PDF slicing
 - `style_guide.py`: splits the owner's style guide into its parts
 - `providers.py`: LLM providers (claude-code, anthropic, openai), the retry policy, and provider switching (`complete_switching`, with a `choose` callback)
-- `plan.py`: episode planning and `plan.yaml` validation
+- `plan.py`: episode planning and `plan.yaml` validation, series folders (`series_dir`)
+- `progress.py`: the `Progress` events `make_plan`, `write_episode` and `render_episode` report through `on_progress`, before each slow step
 - `write.py`: script and critique passes, episode continuity, which episodes to write (`episodes_to_write`)
 - `render.py`: ElevenLabs TTS, piece cache, ffmpeg join and tags, the render cost and balance gate (`preflight`, `Preflight.check`)
 

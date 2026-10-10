@@ -19,6 +19,7 @@ from elevenlabs.core.api_error import ApiError
 
 from lecture_forge.config import Settings
 from lecture_forge.plan import save
+from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.providers import retryable_status
 from lecture_forge.write import episode_dir, script_state, stale_reason
 
@@ -387,6 +388,7 @@ def render_episode(
     *,
     force: bool = False,
     balance: Callable[[], int | None] | None = None,
+    on_progress: OnProgress = ignore,
 ) -> Rendered:
     """`balance` reads the plan's credit balance; read before and after synthesis, the drop
     is recorded in render.json as what this episode cost."""
@@ -403,10 +405,14 @@ def render_episode(
     audio_dir.mkdir(exist_ok=True)
     stitch = settings.model_id not in NO_STITCHING
     files, ids, billed, reused, before = [], [], 0, 0, None
-    for text, key in _keyed(
-        settings, split_text(script, char_limit(settings.model_id))
-    ):
+    pieces = _keyed(settings, split_text(script, char_limit(settings.model_id)))
+    for k, (text, key) in enumerate(pieces, 1):
         mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
+        on_progress(
+            Progress(
+                "piece", k, len(pieces), "reused" if mp3.exists() else "synthesizing"
+            )
+        )
         if mp3.exists():
             reused += 1
         else:
@@ -435,12 +441,14 @@ def render_episode(
     if used:
         state |= dict(zip(MEASURED, (sent, used)))
     artist = plan["author"] or "lecture-forge"
+    on_progress(Progress("join"))
     _join(files, out, {
         "title": ep["title"], "album": plan["title"], "artist": artist, "album_artist": artist,
         "track": f"{ep['n']}/{max(e['n'] for e in plan['episodes'])}", "genre": "Speech",
     })  # fmt: skip
     save(marker, json.dumps(state, indent=2))
     _remove_replaced(previous.get("output"), out, settings, ep["n"])
+    on_progress(Progress("done"))
     return Rendered(out, billed, reused, False, credits if credits > 0 else None)
 
 

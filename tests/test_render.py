@@ -831,3 +831,21 @@ def test_preflight_check_says_whether_a_render_may_start(series, tmp_path, monke
         [], 0, None, 0, None
     )  # nothing to spend: ffmpeg not needed yet
     nothing.check()
+
+
+def test_render_episode_reports_each_piece_then_join_and_done(series, tmp_path, beep):
+    from lecture_forge.progress import Progress
+
+    first, events = [], []
+    run(series, tmp_path, FakeTTS(beep), on_progress=first.append)
+    n = len([e for e in first if e.stage == "piece"])
+    assert n > 1 and first == [
+        *(Progress("piece", k, n, "synthesizing") for k in range(1, n + 1)),
+        Progress("join"),
+        Progress("done"),
+    ]
+    run(series, tmp_path, FakeTTS(beep), force=True, on_progress=events.append)
+    assert [e.note for e in events if e.stage == "piece"] == ["reused"] * n
+    skipped = []
+    run(series, tmp_path, FakeTTS(beep), on_progress=skipped.append)
+    assert skipped == []  # up to date: Rendered.skipped says so; nothing ran

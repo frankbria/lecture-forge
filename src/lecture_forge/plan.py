@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.source import (
     Source,
     extract_text,
@@ -148,7 +149,10 @@ def validate(plan: dict, lo: int, hi: int) -> list[str]:
     return errors
 
 
-def make_plan(src: Source, guide: StyleGuide, start: int, end: int, call: Call) -> dict:
+def make_plan(
+    src: Source, guide: StyleGuide, start: int, end: int, call: Call,
+    *, on_progress: OnProgress = ignore,
+) -> dict:  # fmt: skip
     """Ask the planner for a plan of start..end; one repair round if it comes back invalid."""
     system = RULES + guide.script_prompt
     user = _user_prompt(src, start, end)
@@ -159,7 +163,8 @@ def make_plan(src: Source, guide: StyleGuide, start: int, end: int, call: Call) 
             else None
         )
         prompt = user
-        for _ in range(2):
+        for attempt in range(2):
+            on_progress(Progress("plan", note="repair round" if attempt else ""))
             reply = call(system, prompt, pdf)
             try:
                 plan = parse_plan(reply)

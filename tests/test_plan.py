@@ -475,3 +475,14 @@ def test_a_relative_source_in_the_plan_opens_under_the_project_root(
     (elsewhere / "book.pdf").write_bytes(b"not the book")  # a decoy where it runs
     monkeypatch.chdir(elsewhere)
     assert load_plan(plan_path, root=root)["source"].path == root / "book.pdf"
+
+
+def test_make_plan_reports_progress_before_each_call(book):
+    from lecture_forge.progress import Progress
+
+    events = []
+    replies = iter(["not json", plan_json(episode(1, 6))])
+    make_plan(
+        book, GUIDE, 1, 6, lambda s, u, p: next(replies), on_progress=events.append
+    )
+    assert events == [Progress("plan"), Progress("plan", note="repair round")]
