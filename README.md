@@ -41,7 +41,7 @@ Run the paid tests only when the ElevenLabs or API client code changes. A guard 
 
 ## Setup
 
-Run commands from the repo folder: `.env`, `series/` and the default style guide path are read relative to the current directory. (Or skip the install and use `uv run lecture-forge ...`.)
+Run commands from the project folder (the repo): `.env`, `series/` and the default style guide path are read relative to it, and so are relative paths you put in `.env`. The CLI uses the folder it runs in; the engine takes the project folder explicitly, so a GUI can run from anywhere. (Or skip the install and use `uv run lecture-forge ...`.)
 
 1. `cp .env.example .env` and fill in `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`, plus an LLM key if you aren't using Claude Code.
 2. Provide your style guide. Either copy it to `prompts/style-guide.md` (git-ignored) or set `STYLE_GUIDE_PATH` in `.env`. It must follow the Part 1 (script) / Part 2 (critique) / Part 3 (input template) structure.

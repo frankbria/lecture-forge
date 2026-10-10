@@ -6,7 +6,14 @@ from pathlib import Path
 
 from lecture_forge import render
 from lecture_forge.config import ConfigError, Settings, load_settings
-from lecture_forge.plan import MAX_MINUTES, PlanError, load_plan, make_plan, write_plan
+from lecture_forge.plan import (
+    MAX_MINUTES,
+    PlanError,
+    load_plan,
+    make_plan,
+    series_dir,
+    write_plan,
+)
 from lecture_forge.providers import ProviderError, complete_switching
 from lecture_forge.source import Source, open_source, outline, scanned_note
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
@@ -17,10 +24,8 @@ from lecture_forge.write import (
     write_episode,
 )
 
-SERIES_DIR = Path("series")
-SLUG = re.compile(
-    r"[a-z0-9][a-z0-9_-]*"
-)  # used as a directory name: no paths, no surprises
+# The CLI's project is the folder it runs in; the engine takes the root explicitly.
+ROOT = Path(".")
 
 
 def llm(
@@ -74,11 +79,7 @@ def _range(text: str | None, src: Source) -> tuple[int, int]:
 
 
 def _check_series(slug: str) -> Path:
-    if not SLUG.fullmatch(slug):
-        raise ValueError(
-            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
-        )
-    return SERIES_DIR / slug
+    return series_dir(ROOT, slug)
 
 
 def _provider_call(settings: Settings, auto: bool):
@@ -101,7 +102,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
         raise FileExistsError(
             f"{out} exists and may hold your edits; pass --force to replace it"
         )
-    settings = load_settings()
+    settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
     start, end = _range(args.range, src)
@@ -131,13 +132,13 @@ def cmd_write(args: argparse.Namespace) -> None:
         raise FileNotFoundError(
             f"{plan_path} not found; run `lecture-forge plan` first"
         )
-    plan = load_plan(plan_path)
+    plan = load_plan(plan_path, root=ROOT)
 
     def state(ep: dict) -> str:
         return script_state(series_dir, plan, ep)
 
     todo = episodes_to_write(plan, series_dir, episode=args.episode, force=args.force)
-    settings = load_settings()
+    settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     call = _provider_call(settings, args.auto)
     unit = plan["unit"]
@@ -183,8 +184,8 @@ def cmd_render(args: argparse.Namespace) -> None:
         raise FileNotFoundError(
             f"{plan_path} not found; run `lecture-forge plan` first"
         )
-    plan = load_plan(plan_path)
-    settings = load_settings()
+    plan = load_plan(plan_path, root=ROOT)
+    settings = load_settings(root=ROOT)
     settings.require("elevenlabs_api_key")
     settings.require("voice_id")
     p = render.preflight(
@@ -238,11 +239,11 @@ def cmd_run(args: argparse.Namespace) -> None:
     """plan, write --all, render --all. Every step skips finished work, so a failed or
     interrupted run picks up where it stopped when run again."""
     plan_path = _check_series(args.series) / "plan.yaml"
-    settings = load_settings()
+    settings = load_settings(root=ROOT)
     settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
     settings.require("voice_id")
     if plan_path.exists():
-        planned = load_plan(plan_path)["source"].path.resolve()
+        planned = load_plan(plan_path, root=ROOT)["source"].path.resolve()
         if planned != Path(args.source).resolve():
             raise ValueError(
                 f"{plan_path} is a plan for {planned}; use another --series for {args.source}"

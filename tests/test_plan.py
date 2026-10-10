@@ -12,6 +12,7 @@ from lecture_forge.config import load_settings
 from lecture_forge.plan import (
     MAX_MINUTES,
     PlanError,
+    load_plan,
     make_plan,
     parse_plan,
     source_digest,
@@ -413,3 +414,64 @@ def test_plan_command_notes_scanned_pages_in_its_range(
     out = capsys.readouterr().out
     assert "note: 2 of 3 pages are scans (page images)" in out
     assert "page 3: scanned page image, words not counted" in prompts[0]
+
+
+def test_series_live_under_the_project_root(tmp_path):
+    from lecture_forge.plan import series_dir
+
+    assert series_dir(tmp_path, "algebra-1") == tmp_path / "series" / "algebra-1"
+    for bad in ("../etc", "Algebra", "a/b", ""):
+        with pytest.raises(ValueError, match="lowercase letters"):
+            series_dir(tmp_path, bad)
+
+
+def test_the_engine_runs_on_a_project_root_from_another_folder(
+    tmp_path, monkeypatch, book
+):
+    """A GUI server started anywhere: settings, style guide and series all come from root."""
+    from lecture_forge.plan import series_dir
+    from lecture_forge.style_guide import load_style_guide
+
+    root = tmp_path / "project"
+    (root / "prompts").mkdir(parents=True)
+    (root / "prompts" / "style-guide.md").write_text(
+        "## Part 1\nS\n## Part 2\nC\n## Part 3\n```\nSOURCE MATERIAL:\n```\n"
+    )
+    (root / ".env").write_text("LECTURE_FORGE_PROVIDER=anthropic\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    for var in (
+        "STYLE_GUIDE_PATH",
+        "LECTURE_FORGE_PROVIDER",
+        "LECTURE_FORGE_OUTPUT_DIR",
+    ):
+        monkeypatch.delenv(var, raising=False)  # the real environment would win
+    settings = load_settings(root=root)
+    guide = load_style_guide(settings.style_guide_path)  # the default, under root
+    plan = make_plan(book, guide, 1, 6, lambda s, u, p: plan_json(episode(1, 6)))
+    out = series_dir(root, "algebra") / "plan.yaml"
+    write_plan(plan, book, out)
+    assert out.is_file() and settings.provider == "anthropic"
+    assert not list(elsewhere.iterdir())  # nothing written where the program runs
+
+
+def test_a_relative_source_in_the_plan_opens_under_the_project_root(
+    tmp_path, monkeypatch, book
+):
+    """A hand-edited `source: book.pdf` must never open a same-named file wherever the
+    program happens to run (a GUI server could script and render the wrong book)."""
+    root = tmp_path / "project"
+    plan_path = root / "series" / "s" / "plan.yaml"
+    write_plan(make_plan(book, GUIDE, 1, 6, lambda s, u, p: plan_json(episode(1, 6))),
+               book, plan_path)  # fmt: skip
+    shutil.copy(book.path, root / "book.pdf")
+    plan_path.write_text(
+        plan_path.read_text(encoding="utf-8").replace(str(book.path), "book.pdf"),
+        encoding="utf-8",
+    )  # the owner's hand edit: a relative source
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "book.pdf").write_bytes(b"not the book")  # a decoy where it runs
+    monkeypatch.chdir(elsewhere)
+    assert load_plan(plan_path, root=root)["source"].path == root / "book.pdf"

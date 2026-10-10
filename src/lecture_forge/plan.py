@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -174,6 +175,18 @@ def make_plan(src: Source, guide: StyleGuide, start: int, end: int, call: Call) 
     raise PlanError("the planner's plan is still invalid: " + "; ".join(errors))
 
 
+SLUG = re.compile(r"[a-z0-9][a-z0-9_-]*")  # a folder name: no paths, no surprises
+
+
+def series_dir(root: str | Path, slug: str) -> Path:
+    """Where a series lives in the project at `root`; the slug becomes a folder name."""
+    if not SLUG.fullmatch(slug):
+        raise ValueError(
+            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
+        )
+    return Path(root) / "series" / slug
+
+
 def save(path: Path, text: str) -> None:
     """Write via a temp file and an atomic rename: a crash never leaves a half-written file."""
     tmp = path.with_name(path.name + ".tmp")
@@ -221,7 +234,7 @@ def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> P
     return path
 
 
-def load_plan(path: Path) -> dict:
+def load_plan(path: Path, *, root: str | Path = ".") -> dict:
     """Read a (possibly hand-edited) plan.yaml, checking everything `write` relies on.
 
     Returns {title, author, source: Source, unit, episodes: [{n, title, central_idea,
@@ -239,7 +252,9 @@ def load_plan(path: Path) -> dict:
             f"{path}: source is missing; it must be the path of the book or notes"
         )
     try:
-        src = open_source(source)
+        # A relative source (a hand edit) is under the project root, never wherever the
+        # program runs; plan writes absolute paths, which stay as they are.
+        src = open_source(Path(root) / Path(source).expanduser())
     except (FileNotFoundError, ValueError) as e:
         raise PlanError(
             f"{path}: source {data.get('source')!r} can't be opened ({e})"
