@@ -15,7 +15,7 @@
 | 7 | Low | `available()` crashed (KeyError) for any provider registered in `PROVIDERS` but missing from its readiness table. | Iterates the readiness table instead. | Fixed |
 | 8 | Low | A flaky integration test: the model answered "32" to "digits only" for "3.2". | Prompt now asks for the number exactly as written. Two clean runs. | Fixed |
 | 9 | Note | Worst-case wait: a 30-minute timeout × 4 attempts on a hung call. | — | Accepted. Hangs are rare, and the switch prompt follows. |
-| 10 | Note | The OpenAI success path is untested (no key). Its error path is covered by a real 401. | — | Run `test_openai_reads_pdf` once a key is added |
+| 10 | Note | The OpenAI success path is untested (no key). Its error path is covered by a real 401. | — | Done 2026-10-10 (#7): `test_openai_reads_pdf` passed against the live API |
 | 11 | Note | `llm()` (the switch prompt) has no caller until M3 `plan`. | — | Expected |
 
 **Result:** 46 passed, 1 skipped (OpenAI, no key). Integration tests make real calls to Claude Code (subscription) and the Anthropic API.

@@ -82,7 +82,7 @@ All three providers implement one interface: `complete(provider, system, user, p
 |---|---|---|---|---|
 | Claude Code headless (**default**) | `claude-code` | your subscription (`claude -p`) | your Claude Code default | The sliced PDF is copied into a temporary directory, which it reads with the Read tool (the only tool enabled; reads outside that directory are denied). |
 | Claude API | `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-5-5`, effort `high` | Native `document` block. Server-side refusal fallback is on (`fallbacks: "default"`). |
-| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.5` | Native `input_file` in the Responses API. |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.5` | Native `input_file` in the Responses API. Checked against the live API on 2026-10-10 (openai SDK 3.24.0): `test_openai_reads_pdf` passed with the request as written. |
 
 - Every provider sees the actual PDF pages, so there is **no text extraction** on any LLM path.
 - `LECTURE_FORGE_LLM_MODEL` overrides the model for whichever provider is in use.
