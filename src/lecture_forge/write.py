@@ -329,6 +329,24 @@ def episodes_to_write(
     return out
 
 
+def on_old_recap(
+    plan: dict, series_dir: Path, todo: list[tuple[dict, str, str]], ep: dict
+) -> list[int]:
+    """The later written episodes that rewriting ep leaves on its old summary and puzzle:
+    the ones this run (todo, from episodes_to_write) doesn't write again. Empty unless ep
+    is rewritten."""
+    actions = {e["n"]: action for e, action, _ in todo}
+    if actions.get(ep["n"]) != "rewrite":
+        return []
+    return [
+        e["n"]
+        for e in plan["episodes"]
+        if e["n"] > ep["n"]
+        and actions.get(e["n"], "skip") == "skip"
+        and script_state(series_dir, plan, e) != "missing"
+    ]
+
+
 def write_episode(
     plan: dict, ep: dict, guide: StyleGuide, call: Call, series_dir: Path,
     *, on_progress: OnProgress = ignore,
