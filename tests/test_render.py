@@ -813,3 +813,21 @@ def test_preflight_over_balance_boundary(series, tmp_path, monkeypatch):
         assert (
             r.preflight(plan, series, s, episode=None, force=False).over_balance is over
         )
+
+
+def test_preflight_check_says_whether_a_render_may_start(series, tmp_path, monkeypatch):
+    """The gate a GUI needs before asking for a yes: over the balance, or no ffmpeg."""
+    plan = load_plan(series / "plan.yaml")
+    s = settings(tmp_path)
+    monkeypatch.setattr(r, "characters_left", lambda s: 100)
+    with pytest.raises(RenderError, match="only 100 characters left"):
+        r.preflight(plan, series, s, episode=None, force=False).check()
+    monkeypatch.setattr(r, "characters_left", lambda s: None)
+    r.preflight(plan, series, s, episode=None, force=False).check()  # may start
+    monkeypatch.setenv("PATH", "")
+    with pytest.raises(RenderError, match="ffmpeg is not installed"):
+        r.preflight(plan, series, s, episode=None, force=False).check()
+    nothing = r.Preflight(
+        [], 0, None, 0, None
+    )  # nothing to spend: ffmpeg not needed yet
+    nothing.check()

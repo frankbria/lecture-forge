@@ -210,13 +210,7 @@ def cmd_render(args: argparse.Namespace) -> None:
     else:
         cost = f"{p.total:,} characters (about as many credits; no render measured yet for {settings.model_id})"
     print(f"Total: {cost}{balance}")
-    if p.over_balance:
-        raise render.RenderError(
-            f"this needs about {p.estimate:,} credits but your plan has only {p.left:,} characters "
-            "left (ElevenLabs counts credits as characters)"
-        )
-    if p.total:  # don't ask to spend on an episode that can't be finished
-        render.require_ffmpeg()
+    p.check()  # over the balance, or no ffmpeg to finish with
     if p.total and not args.yes:  # spending money always needs a yes
         if not sys.stdin.isatty():
             raise render.RenderError(

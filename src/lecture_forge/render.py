@@ -309,6 +309,17 @@ class Preflight:
     def over_balance(self) -> bool:
         return self.left is not None and self.estimate > self.left
 
+    def check(self) -> None:
+        """Raise if this render mustn't start: it needs more credits than the plan has, or
+        there is something to spend on and no ffmpeg to finish it with."""
+        if self.over_balance:
+            raise RenderError(
+                f"this needs about {self.estimate:,} credits but your plan has only "
+                f"{self.left:,} characters left (ElevenLabs counts credits as characters)"
+            )
+        if self.total:
+            require_ffmpeg()
+
 
 def preflight(
     plan: dict,
