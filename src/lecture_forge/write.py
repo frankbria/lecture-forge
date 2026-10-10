@@ -232,9 +232,8 @@ def _check_draft(found: dict[str, str]) -> list[str]:
 
 def _check_critique(found: dict[str, str], draft: str) -> list[str]:
     raw = found.get("Revised script", "")
-    cut = _cut_problem(
-        "revised script", raw
-    )  # first: a leading rule empties the script
+    # The rule check comes first: a rule on the first line empties the script.
+    cut = _cut_problem("revised script", raw)
     if not cut and not _spoken(raw):
         return ["the Revised script section is missing or empty"]
     problems = [cut] if cut else []
