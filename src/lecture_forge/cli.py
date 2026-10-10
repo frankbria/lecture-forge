@@ -246,6 +246,8 @@ def cmd_render(args: argparse.Namespace) -> None:
             f"this needs about {estimate:,} credits but your plan has only {left:,} characters "
             "left (ElevenLabs counts credits as characters)"
         )
+    if total:  # don't ask to spend on an episode that can't be finished
+        render.require_ffmpeg()
     if total and not args.yes:  # spending money always needs a yes
         if not sys.stdin.isatty():
             raise render.RenderError(

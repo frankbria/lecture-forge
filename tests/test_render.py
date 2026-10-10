@@ -676,3 +676,95 @@ def test_render_all_measures_each_episode_between_its_own_balance_reads(
     assert main(["render", "algebra", "--all", "--yes"]) == 0
     sdir = root / "series" / "algebra"
     assert [marker(sdir, n)["credits_used"] for n in (1, 2)] == [1000, 500]
+
+
+# --- failure paths on the money path (#28) ------------------------------------------------
+
+
+def test_missing_ffmpeg_fails_before_any_paid_request(
+    series, tmp_path, beep, monkeypatch
+):
+    monkeypatch.setenv("PATH", "")
+    tts = FakeTTS(beep)
+    with pytest.raises(RenderError, match="ffmpeg"):
+        run(series, tmp_path, tts)
+    assert tts.calls == []  # nothing paid for
+    assert not (tmp_path / "Lectures").exists()  # no empty album folder in Dropbox
+
+
+class CorruptAfter(FakeTTS):
+    """Real audio for the first piece, then bytes that aren't audio (a corrupt piece)."""
+
+    def __call__(self, text, previous_ids):
+        audio, rid = super().__call__(text, previous_ids)
+        return (audio if len(self.calls) == 1 else b"not audio at all"), rid
+
+
+@pytest.mark.parametrize("corrupt", ["every piece", "after the first"])
+def test_ffmpeg_failure_leaves_no_partial_or_published_file(
+    series, tmp_path, beep, corrupt
+):
+    """ffmpeg exits 0 after a good piece and a bad one, writing only the good part: that
+    truncated episode must never be published."""
+    tts = (
+        FakeTTS(b"not audio at all") if corrupt == "every piece" else CorruptAfter(beep)
+    )
+    with pytest.raises(RenderError, match="ffmpeg failed"):
+        run(series, tmp_path, tts)
+    assert len(tts.calls) > 1  # the episode really had a piece after the first
+    out = tmp_path / "Lectures"
+    assert not list(out.rglob("*.mp3")) and not list(out.rglob("*.part"))
+    assert not (episode_dir(series, 1) / "render.json").exists()
+
+
+def test_network_error_is_retried_then_succeeds():
+    import httpx
+
+    replies = [httpx.ConnectError("boom"), (b"x", "req-1")]
+
+    def convert(**kw):
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    delays = []
+    tts = r.elevenlabs_tts(
+        settings_obj(), convert=convert, sleep=delays.append, attempts=3
+    )
+    assert tts("hi", []) == (b"x", "req-1") and delays == [10]
+
+
+def test_rendering_twice_spends_nothing_the_second_time(project, capsys):
+    _, tts = project
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    paid = len(tts.calls)
+    capsys.readouterr()
+    assert main(["render", "algebra", "--all", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert len(tts.calls) == paid and paid > 0
+    assert "already rendered" in out and "0 characters to synthesize" in out
+
+
+def test_a_cache_only_rebuild_without_ffmpeg_fails_without_paying(
+    series, tmp_path, beep, monkeypatch
+):
+    run(series, tmp_path, FakeTTS(beep))  # every piece cached
+    monkeypatch.setenv("PATH", "")
+    tts = FakeTTS(beep)
+    with pytest.raises(RenderError, match="ffmpeg is not installed"):
+        run(series, tmp_path, tts, force=True)
+    assert tts.calls == []
+
+
+def test_render_without_ffmpeg_fails_before_asking_to_spend(
+    project, capsys, monkeypatch
+):
+    _, tts = project
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("asked to spend"))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert main(["render", "algebra", "--all"]) == 1
+    out, err = capsys.readouterr()
+    assert "ffmpeg is not installed" in err and tts.calls == []
+    assert "characters to synthesize" in out  # the free cost preview still shows

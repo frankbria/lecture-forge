@@ -280,16 +280,21 @@ def cost(
     return sum(len(t) for t, k in pieces if not (audio / f"{k}.mp3").exists())
 
 
-def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
-    """Concatenate the pieces and tag them; publish atomically so Dropbox never syncs a half file."""
+def require_ffmpeg() -> None:
+    """A machine without ffmpeg can't finish an episode, so nothing may be spent on one."""
     if shutil.which("ffmpeg") is None:
         raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
+
+
+def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
+    """Concatenate the pieces and tag them; publish atomically so Dropbox never syncs a half file."""
     tmp = out.with_name(f".{out.name}.part")
     with tempfile.TemporaryDirectory() as td:
         listing = Path(td) / "pieces.txt"
         quoted = (str(f.resolve()).replace("'", "'\\''") for f in files)
         listing.write_text("".join(f"file '{q}'\n" for q in quoted), encoding="utf-8")
-        cmd = ["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
+        # -xerror: without it a corrupt piece after a good one exits 0 with a truncated file.
+        cmd = ["ffmpeg", "-loglevel", "error", "-xerror", "-y", "-f", "concat", "-safe", "0",
                "-i", str(listing), "-c", "copy", "-map_metadata", "-1", "-id3v2_version", "3"]  # fmt: skip
         for k, v in tags.items():
             cmd += ["-metadata", f"{k}={v}"]
@@ -317,6 +322,7 @@ def render_episode(
     script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings)
     if up_to_date and not force:
         return Rendered(out, 0, 0, True)
+    require_ffmpeg()  # before any folder or paid request
     # Folders only now, after the skip check: a cost preview or a skip creates nothing.
     out.parent.parent.mkdir(exist_ok=True)  # the output dir; its parent was checked
     out.parent.mkdir(exist_ok=True)
