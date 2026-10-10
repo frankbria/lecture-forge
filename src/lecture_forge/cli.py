@@ -262,7 +262,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="lecture-forge")
+    parser = argparse.ArgumentParser()  # prog defaults to the name typed
     sub = parser.add_subparsers(required=True)
     p = sub.add_parser("outline", help="show a source's length and bookmarks/headings")
     p.add_argument("source")

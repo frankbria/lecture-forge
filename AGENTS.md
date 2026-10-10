@@ -12,7 +12,7 @@ uv run ruff format --check .
 
 ## Money and safety (hard rules)
 
-- Never run `lecture-forge render` or `lecture-forge run`, and never set `LECTURE_FORGE_PAID_TESTS`, without the owner's explicit go-ahead: they spend ElevenLabs credits / API money.
+- Never run `lecture-forge render` or `lecture-forge run` (or the same commands as `lforge`, its alias), and never set `LECTURE_FORGE_PAID_TESTS`, without the owner's explicit go-ahead: they spend ElevenLabs credits / API money.
 - Never run pytest without `-m "not integration"` unless asked: integration tests call Claude Code on the owner's subscription.
 - Never read or print `.env` (real keys). The app reads it with `dotenv_values`; never call `load_dotenv()`.
 - Never modify `series/` (the owner's plans, scripts and paid audio cache) or the output folder (`LECTURE_FORGE_OUTPUT_DIR`, default `/mnt/d/Dropbox/Lectures`).

@@ -11,7 +11,7 @@ PDF / Markdown / text → episode plan → script (written, then critiqued) → 
 Available now:
 
 ```bash
-uv tool install --editable .              # once: puts `lecture-forge` on your PATH
+uv tool install --editable .              # once: puts `lecture-forge` and its short alias `lforge` on your PATH
 lecture-forge outline book.pdf                  # length + bookmarks/headings of a PDF/md/txt source
 lecture-forge plan book.pdf --series topology   # proposes series/topology/plan.yaml; review and edit it
 lecture-forge plan book.pdf --series ch3 --range 120-185   # plan one chapter of a full book
@@ -21,6 +21,8 @@ lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\<s
 lecture-forge run chapter3.pdf --series topo3   # plan, stop for review; run it again to write and render
 lecture-forge run chapter3.pdf --series topo3 --auto --yes   # everything, no stops, spending included
 ```
+
+`lforge` is the same command under a shorter name: `lforge outline book.pdf`. Help and usage errors show the name you typed. If you installed before the alias existed, run `uv tool install --editable . --force` once to get it.
 
 The planner reads the content itself and breaks at clean concept boundaries, one central idea and at most 30 minutes per episode. Each episode records why it ends where it does.
 
