@@ -517,3 +517,29 @@ def test_claude_code_takes_a_pdf_over_the_api_limits(fake_claude, tmp_path):
     pdf = big_pdf(tmp_path / "book.pdf", 650)
     assert complete("claude-code", "s", "u", pdf, settings=settings()) == "ok"
     assert call()["files"]  # the PDF was handed over
+
+
+# --- provider switching in the engine (#32) ----------------------------------------------
+
+
+def test_complete_switching_asks_choose_and_keeps_the_switch(fake, monkeypatch):
+    fake([ProviderError("fake", "400")])
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", flaky([]))
+    asked, notes = [], []
+    s = settings(provider="fake", anthropic_api_key="k", llm_model="fake-big")
+    text, now = providers.complete_switching(
+        s, "s", "u", choose=lambda e: asked.append(e.alternatives) or "anthropic",
+        on_note=notes.append,
+    )  # fmt: skip
+    assert (text, now.provider, now.llm_model) == ("ok:u", "anthropic", "")
+    assert "anthropic" in asked[0]  # the error carries what can be chosen
+    assert notes == ["note: ignoring LECTURE_FORGE_LLM_MODEL=fake-big for anthropic"]
+
+
+@pytest.mark.parametrize("choose", [None, lambda e: None, lambda e: "not-a-provider"])
+def test_complete_switching_gives_up_without_a_valid_choice(fake, choose):
+    fake([ProviderError("fake", "400")])
+    with pytest.raises(ProviderError, match="400"):
+        providers.complete_switching(
+            settings(provider="fake", anthropic_api_key="k"), "s", "u", choose=choose
+        )

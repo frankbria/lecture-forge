@@ -286,6 +286,66 @@ def require_ffmpeg() -> None:
         raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
 
 
+@dataclass(frozen=True)
+class Preflight:
+    """What rendering would spend, decided before anything is. A front end shows it and
+    gets an explicit yes before calling render_episode."""
+
+    episodes: list[
+        tuple[dict, int | None, str]
+    ]  # (episode, characters to send, or None and why it's skipped)
+    total: int  # characters to send
+    rate: (
+        float | None
+    )  # measured credits per character; None until a render of the model
+    estimate: int  # credits: total at the measured rate, or one per character
+    left: int | None  # credits left on the plan; None if it can't be read
+
+    @property
+    def ready(self) -> list[dict]:
+        return [ep for ep, chars, _ in self.episodes if chars is not None]
+
+    @property
+    def over_balance(self) -> bool:
+        return self.left is not None and self.estimate > self.left
+
+
+def preflight(
+    plan: dict,
+    series_dir: Path,
+    settings: Settings,
+    *,
+    episode: int | None,
+    force: bool,
+) -> Preflight:
+    """The cost of rendering one episode or every written one. With --all, unwritten and
+    stale episodes are skipped; one requested episode raises why it can't render instead."""
+    if episode is not None:
+        todo = [e for e in plan["episodes"] if e["n"] == episode]
+        if not todo:
+            raise ValueError(f"the plan has no episode {episode}")
+    else:
+        todo = plan["episodes"]
+    rows, total = [], 0
+    rate = credit_rate(series_dir, settings.model_id)
+    for ep in todo:
+        state = script_state(series_dir, plan, ep)
+        if state != "current" and episode is None:  # one episode: cost() says why
+            why = (
+                "not written yet"
+                if state == "missing"
+                else f"script no longer matches the plan ({stale_reason(series_dir, plan, ep)})"
+            )
+            rows.append((ep, None, why))
+            continue
+        chars = cost(plan, ep, series_dir, settings, force=force)
+        rows.append((ep, chars, ""))
+        total += chars
+    left = characters_left(settings)
+    # Nothing measured yet: assume the worst, one credit per character.
+    return Preflight(rows, total, rate, round(total * (rate or 1.0)), left)
+
+
 def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
     """Concatenate the pieces and tag them; publish atomically so Dropbox never syncs a half file."""
     tmp = out.with_name(f".{out.name}.part")

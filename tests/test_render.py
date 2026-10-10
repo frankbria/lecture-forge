@@ -768,3 +768,36 @@ def test_render_without_ffmpeg_fails_before_asking_to_spend(
     out, err = capsys.readouterr()
     assert "ffmpeg is not installed" in err and tts.calls == []
     assert "characters to synthesize" in out  # the free cost preview still shows
+
+
+# --- the render decision in the engine (#32) -----------------------------------------------
+
+
+def test_preflight_decides_what_a_render_costs_without_printing(
+    series, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(r, "characters_left", lambda s: 100)
+    plan = load_plan(series / "plan.yaml")
+    p = r.preflight(plan, series, settings(tmp_path), episode=None, force=False)
+    assert [(ep["n"], why) for ep, chars, why in p.episodes] == [
+        (1, ""), (2, ""), (3, "not written yet")
+    ]  # fmt: skip
+    assert [ep["n"] for ep in p.ready] == [1, 2]
+    assert (
+        p.total == sum(chars for _, chars, _ in p.episodes if chars is not None) > 100
+    )
+    assert p.rate is None and p.estimate == p.total and p.left == 100 and p.over_balance
+    assert capsys.readouterr() == ("", "")  # a GUI shows the numbers its own way
+
+
+def test_preflight_of_one_episode_raises_as_the_cli_does(series, tmp_path, monkeypatch):
+    monkeypatch.setattr(r, "characters_left", lambda s: None)
+    plan = load_plan(series / "plan.yaml")
+    with pytest.raises(ValueError, match="no episode 9"):
+        r.preflight(plan, series, settings(tmp_path), episode=9, force=False)
+    with pytest.raises(RenderError, match="write episode 3 first"):
+        r.preflight(plan, series, settings(tmp_path), episode=3, force=False)
+    one = r.preflight(plan, series, settings(tmp_path), episode=2, force=False)
+    assert [ep["n"] for ep in one.ready] == [
+        2
+    ] and not one.over_balance  # balance unknown

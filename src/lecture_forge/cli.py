@@ -1,5 +1,4 @@
 import argparse
-import dataclasses
 import re
 import sys
 from collections.abc import Callable
@@ -8,10 +7,15 @@ from pathlib import Path
 from lecture_forge import render
 from lecture_forge.config import ConfigError, Settings, load_settings
 from lecture_forge.plan import MAX_MINUTES, PlanError, load_plan, make_plan, write_plan
-from lecture_forge.providers import ProviderError, complete
+from lecture_forge.providers import ProviderError, complete_switching
 from lecture_forge.source import Source, open_source, outline, scanned_note
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
-from lecture_forge.write import WriteError, script_state, stale_reason, write_episode
+from lecture_forge.write import (
+    WriteError,
+    episodes_to_write,
+    script_state,
+    write_episode,
+)
 
 SERIES_DIR = Path("series")
 SLUG = re.compile(
@@ -28,28 +32,21 @@ def llm(
     interactive: bool,
     ask: Callable[[str], str] = input,
 ) -> tuple[str, Settings]:
-    """complete() on settings.provider; once retries run out, offer to switch providers.
+    """complete_switching() with the terminal as the chooser: when retries run out, show
+    the error and ask which provider to switch to."""
 
-    Returns (text, settings to use from now on). After a switch those settings name the
-    new provider and drop the old provider's model override, so later calls stay on it.
-    """
-    while True:
-        try:
-            return complete(
-                settings.provider, system, user, pdf, settings=settings
-            ), settings
-        except ProviderError as e:
-            if not (interactive and e.alternatives):
-                raise
-            print(f"error: {e}", file=sys.stderr)
-            choice = ask(f"Switch provider? [{'/'.join(e.alternatives)}/n]: ").strip()
-            if choice not in e.alternatives:
-                raise
-            if settings.llm_model:  # a model override names the old provider's model
-                print(
-                    f"note: ignoring LECTURE_FORGE_LLM_MODEL={settings.llm_model} for {choice}"
-                )
-            settings = dataclasses.replace(settings, provider=choice, llm_model="")
+    def choose(e: ProviderError) -> str:
+        print(f"error: {e}", file=sys.stderr)
+        return ask(f"Switch provider? [{'/'.join(e.alternatives)}/n]: ").strip()
+
+    return complete_switching(
+        settings,
+        system,
+        user,
+        pdf,
+        choose=choose if interactive else None,
+        on_note=print,
+    )
 
 
 def cmd_outline(args: argparse.Namespace) -> None:
@@ -139,28 +136,17 @@ def cmd_write(args: argparse.Namespace) -> None:
     def state(ep: dict) -> str:
         return script_state(series_dir, plan, ep)
 
-    if args.episode is not None:
-        todo = [e for e in plan["episodes"] if e["n"] == args.episode]
-        if not todo:
-            raise ValueError(f"the plan has no episode {args.episode}")
-        if state(todo[0]) == "current" and not args.force:
-            raise FileExistsError(
-                f"episode {args.episode} is already written; pass --force to rewrite it"
-            )
-    else:
-        todo = plan["episodes"]
+    todo = episodes_to_write(plan, series_dir, episode=args.episode, force=args.force)
     settings = load_settings()
     guide = load_style_guide(settings.style_guide_path)
     call = _provider_call(settings, args.auto)
     unit = plan["unit"]
-    for ep in todo:
-        now = state(ep)
-        rewriting = now != "missing"
-        if now == "current" and not args.force:
-            print(f"Episode {ep['n']}: {ep['title']}: already written, skipping")
+    for ep, action, why in todo:
+        rewriting = action == "rewrite"
+        if action == "skip":
+            print(f"Episode {ep['n']}: {ep['title']}: {why}, skipping")
             continue
-        if now == "stale":
-            why = stale_reason(series_dir, plan, ep)
+        if why:  # stale: the plan changed since it was written
             print(f"Episode {ep['n']}: {ep['title']}: plan changed ({why}), rewriting")
         where = f"{unit} {ep['start']}-{ep['end']}"
         print(
@@ -201,54 +187,37 @@ def cmd_render(args: argparse.Namespace) -> None:
     settings = load_settings()
     settings.require("elevenlabs_api_key")
     settings.require("voice_id")
-    if args.episode is not None:
-        todo = [e for e in plan["episodes"] if e["n"] == args.episode]
-        if not todo:
-            raise ValueError(f"the plan has no episode {args.episode}")
-    else:
-        todo = plan["episodes"]
-    ready, total = [], 0
-    rate = render.credit_rate(series_dir, settings.model_id)
-    for ep in todo:
-        state = script_state(series_dir, plan, ep)
-        if state != "current" and args.episode is None:  # one episode: cost() says why
-            why = (
-                "not written yet"
-                if state == "missing"
-                else f"script no longer matches the plan ({stale_reason(series_dir, plan, ep)})"
-            )
+    p = render.preflight(
+        plan, series_dir, settings, episode=args.episode, force=args.force
+    )
+    for ep, chars, why in p.episodes:
+        if chars is None:
             print(f"Episode {ep['n']}: {ep['title']}: {why}, skipping")
             continue
-        chars = render.cost(plan, ep, series_dir, settings, force=args.force)
         cost = (
-            f"~{round(chars * rate):,} credits ({chars:,} characters)"
-            if rate
+            f"~{round(chars * p.rate):,} credits ({chars:,} characters)"
+            if p.rate
             else f"{chars:,} characters"
         )
         print(f"Episode {ep['n']}: {ep['title']}: {cost} to synthesize")
-        ready.append(ep)
-        total += chars
-    left = render.characters_left(settings)
     balance = (
-        f"; {left:,} credits left on your ElevenLabs plan" if left is not None else ""
+        f"; {p.left:,} credits left on your ElevenLabs plan"
+        if p.left is not None
+        else ""
     )
-    # Nothing measured yet: assume the worst, one credit per character.
-    estimate = round(total * (rate or 1.0))
-    if rate:
-        cost = (
-            f"~{estimate:,} credits ({total:,} characters at {rate:.2f}/char, measured)"
-        )
+    if p.rate:
+        cost = f"~{p.estimate:,} credits ({p.total:,} characters at {p.rate:.2f}/char, measured)"
     else:
-        cost = f"{total:,} characters (about as many credits; no render measured yet for {settings.model_id})"
+        cost = f"{p.total:,} characters (about as many credits; no render measured yet for {settings.model_id})"
     print(f"Total: {cost}{balance}")
-    if left is not None and estimate > left:
+    if p.over_balance:
         raise render.RenderError(
-            f"this needs about {estimate:,} credits but your plan has only {left:,} characters "
+            f"this needs about {p.estimate:,} credits but your plan has only {p.left:,} characters "
             "left (ElevenLabs counts credits as characters)"
         )
-    if total:  # don't ask to spend on an episode that can't be finished
+    if p.total:  # don't ask to spend on an episode that can't be finished
         render.require_ffmpeg()
-    if total and not args.yes:  # spending money always needs a yes
+    if p.total and not args.yes:  # spending money always needs a yes
         if not sys.stdin.isatty():
             raise render.RenderError(
                 "rendering spends ElevenLabs credits; pass --yes to confirm"
@@ -256,7 +225,7 @@ def cmd_render(args: argparse.Namespace) -> None:
         if input("Render? [y/N] ").strip().lower() not in ("y", "yes"):
             raise render.RenderError("cancelled; nothing was spent")
     tts = render.elevenlabs_tts(settings)
-    for ep in ready:
+    for ep in p.ready:
         print(f"Episode {ep['n']}: {ep['title']}: rendering...", flush=True)
         res = render.render_episode(
             plan, ep, series_dir, settings, tts, force=args.force,

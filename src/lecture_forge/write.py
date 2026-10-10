@@ -298,6 +298,33 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
     return summary, puzzle
 
 
+def episodes_to_write(
+    plan: dict, series_dir: Path, *, episode: int | None, force: bool
+) -> list[tuple[dict, str, str]]:
+    """(episode, "write" | "rewrite" | "skip", why) in plan order. A requested episode that
+    doesn't exist, or is already written without force, raises instead."""
+    if episode is not None:
+        todo = [e for e in plan["episodes"] if e["n"] == episode]
+        if not todo:
+            raise ValueError(f"the plan has no episode {episode}")
+        if script_state(series_dir, plan, todo[0]) == "current" and not force:
+            raise FileExistsError(
+                f"episode {episode} is already written; pass --force to rewrite it"
+            )
+    else:
+        todo = plan["episodes"]
+    out = []
+    for ep in todo:
+        state = script_state(series_dir, plan, ep)
+        if state == "current" and not force:
+            out.append((ep, "skip", "already written"))
+        elif state == "stale":
+            out.append((ep, "rewrite", stale_reason(series_dir, plan, ep)))
+        else:
+            out.append((ep, "write" if state == "missing" else "rewrite", ""))
+    return out
+
+
 def write_episode(
     plan: dict, ep: dict, guide: StyleGuide, call: Call, series_dir: Path
 ) -> Written:
