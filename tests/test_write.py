@@ -782,3 +782,31 @@ def test_critique_without_a_revised_script_gets_one_repair_round(tmp_path, book)
 
     run(tmp_path, book, call)
     assert "the Revised script section is missing or empty" in prompts[2]
+
+
+def test_rule_line_in_the_middle_of_the_script_gets_a_repair_round(tmp_path, book):
+    """A '---' scene break mustn't silently drop the half of the lecture after it."""
+    split = SCRIPT + "\n\n---\n\n" + SCRIPT
+    replies = iter([draft_reply(), critique_reply(script=split), critique_reply()])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert len(prompts) == 3 and "rule line" in prompts[2]
+
+
+def test_rule_line_in_the_middle_of_the_draft_gets_a_repair_round(tmp_path, book):
+    split = SCRIPT + "\n\n***\n\n" + SCRIPT
+    replies = iter([draft_reply(script=split), draft_reply(), critique_reply()])
+    prompts = []
+
+    def call(system, user, pdf):
+        prompts.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call)
+    assert len(prompts) == 3 and "rule line" in prompts[1]
+    assert "SCRIPT TO REVIEW" in prompts[2]  # the critique saw the repaired draft

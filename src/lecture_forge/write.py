@@ -71,6 +71,19 @@ def _spoken(script: str) -> str:
     return "\n".join(lines[:cut]).strip()
 
 
+def _cut_problem(name: str, text: str) -> str | None:
+    """A rule line with more after it than a remark: a scene break would silently drop the
+    rest of the lecture, so it goes back for repair instead."""
+    words = len(text.split())
+    dropped = words - len(_spoken(text).split())
+    if dropped > max(150, words // 10):  # a trailing remark (~30 words) is cut silently
+        return (
+            f"the {name} has a markdown rule line (---, ***, ___) with {dropped} words after "
+            "it; anything after a rule line is dropped, so remove rule lines from the script"
+        )
+    return None
+
+
 def episode_dir(series_dir: Path, n: int) -> Path:
     return Path(series_dir) / "episodes" / f"{n:02d}"
 
@@ -200,17 +213,22 @@ def _ask(
 
 
 def _check_draft(found: dict[str, str]) -> list[str]:
-    return [
+    problems = [
         f"the {name} section is missing or empty"
         for name in ("SCRIPT", "PUZZLE ANSWER", "EPISODE SUMMARY")
         if not found.get(name)
     ]
+    if found.get("SCRIPT") and (cut := _cut_problem("SCRIPT", found["SCRIPT"])):
+        problems.append(cut)
+    return problems
 
 
 def _check_critique(found: dict[str, str], draft: str) -> list[str]:
     revised = _spoken(found.get("Revised script", ""))
     if not revised:
         return ["the Revised script section is missing or empty"]
+    if cut := _cut_problem("revised script", found["Revised script"]):
+        return [cut]
     if empty := [
         n for n in ("PUZZLE ANSWER", "EPISODE SUMMARY") if n in found and not found[n]
     ]:
