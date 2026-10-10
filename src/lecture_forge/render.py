@@ -408,12 +408,10 @@ def render_episode(
     pieces = _keyed(settings, split_text(script, char_limit(settings.model_id)))
     for k, (text, key) in enumerate(pieces, 1):
         mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
-        on_progress(
-            Progress(
-                "piece", k, len(pieces), "reused" if mp3.exists() else "synthesizing"
-            )
-        )
-        if mp3.exists():
+        cached = mp3.exists()  # checked once: the event and the work agree
+        note = "reused" if cached else "synthesizing"
+        on_progress(Progress("piece", k, len(pieces), note, episode=ep["n"]))
+        if cached:
             reused += 1
         else:
             if balance and not billed:  # just before the first piece paid for
@@ -441,14 +439,14 @@ def render_episode(
     if used:
         state |= dict(zip(MEASURED, (sent, used)))
     artist = plan["author"] or "lecture-forge"
-    on_progress(Progress("join"))
+    on_progress(Progress("join", episode=ep["n"]))
     _join(files, out, {
         "title": ep["title"], "album": plan["title"], "artist": artist, "album_artist": artist,
         "track": f"{ep['n']}/{max(e['n'] for e in plan['episodes'])}", "genre": "Speech",
     })  # fmt: skip
     save(marker, json.dumps(state, indent=2))
     _remove_replaced(previous.get("output"), out, settings, ep["n"])
-    on_progress(Progress("done"))
+    on_progress(Progress("done", episode=ep["n"]))
     return Rendered(out, billed, reused, False, credits if credits > 0 else None)
 
 

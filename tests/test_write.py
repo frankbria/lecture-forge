@@ -897,5 +897,20 @@ def test_write_episode_reports_each_pass_and_repair(tmp_path, book):
     write_episode(plan, ep, GUIDE, lambda s, u, p: next(replies),
                   tmp_path / "series" / "algebra", on_progress=events.append)  # fmt: skip
     assert events == [
-        Progress("draft"), Progress("draft", note="repair round"), Progress("critique")
+        Progress("draft", episode=1), Progress("draft", note="repair round", episode=1),
+        Progress("critique", episode=1),
+    ]  # fmt: skip
+
+
+def test_write_episode_reports_a_critique_repair_round(tmp_path, book):
+
+    events = []
+    replies = iter(
+        [draft_reply(), critique_reply(script="Too short."), critique_reply()]
+    )
+    plan = load_plan(make_plan_file(tmp_path, book, [(1, [1, 3]), (2, [4, 6])]))
+    write_episode(plan, plan["episodes"][0], GUIDE, lambda s, u, p: next(replies),
+                  tmp_path / "series" / "algebra", on_progress=events.append)  # fmt: skip
+    assert [(e.stage, e.note) for e in events] == [
+        ("draft", ""), ("critique", ""), ("critique", "repair round")
     ]  # fmt: skip

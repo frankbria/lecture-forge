@@ -840,12 +840,26 @@ def test_render_episode_reports_each_piece_then_join_and_done(series, tmp_path, 
     run(series, tmp_path, FakeTTS(beep), on_progress=first.append)
     n = len([e for e in first if e.stage == "piece"])
     assert n > 1 and first == [
-        *(Progress("piece", k, n, "synthesizing") for k in range(1, n + 1)),
-        Progress("join"),
-        Progress("done"),
+        *(Progress("piece", k, n, "synthesizing", episode=1) for k in range(1, n + 1)),
+        Progress("join", episode=1),
+        Progress("done", episode=1),
     ]
     run(series, tmp_path, FakeTTS(beep), force=True, on_progress=events.append)
     assert [e.note for e in events if e.stage == "piece"] == ["reused"] * n
     skipped = []
     run(series, tmp_path, FakeTTS(beep), on_progress=skipped.append)
     assert skipped == []  # up to date: Rendered.skipped says so; nothing ran
+
+
+def test_a_repeated_piece_is_reported_as_reused_not_paid(series, tmp_path, beep):
+    """eleven_v3 doesn't stitch, so identical text has one cache key: paid once."""
+    script = episode_dir(series, 1) / "script.txt"
+    script.write_text("\n\n".join([PARA] * 36), encoding="utf-8")  # 6 per piece
+    assert (
+        len(set(split_text(script.read_text(encoding="utf-8"), 5000))) == 1
+    )  # all equal
+    events, tts = [], FakeTTS(beep)
+    result = run(series, tmp_path, tts, on_progress=events.append)
+    notes = [e.note for e in events if e.stage == "piece"]
+    assert notes[0] == "synthesizing" and set(notes[1:]) == {"reused"}
+    assert len(tts.calls) == 1 and result.reused == len(notes) - 1

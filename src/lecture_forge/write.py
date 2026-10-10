@@ -1,5 +1,6 @@
 """Write one episode: a script pass (style guide Part 1), then a critique pass (Part 2)."""
 
+import dataclasses
 import json
 import re
 import tempfile
@@ -205,7 +206,7 @@ def fill_template(template: str, **values: str) -> str:
 def _ask(
     call: Call, system: str, user: str, pdf: Path | None, names: list[str],
     check: Callable[[dict[str, str]], list[str]], strict=(),
-    stage: str = "", on_progress: OnProgress = ignore,
+    *, stage: str, on_progress: OnProgress,
 ) -> tuple[str, dict[str, str]]:  # fmt: skip
     """One call, checked; one repair round with the problems listed, then WriteError."""
     prompt = user
@@ -334,6 +335,10 @@ def write_episode(
 ) -> Written:  # fmt: skip
     """Draft, critique and save one episode. script.txt is written last: it marks done."""
     prev = _previous(plan, ep, series_dir)
+
+    def report(event: Progress) -> None:
+        on_progress(dataclasses.replace(event, episode=ep["n"]))
+
     src, unit, start, end = plan["source"], plan["unit"], ep["start"], ep["end"]
     by = f", {plan['author']}" if plan["author"] else ""
     series = (
@@ -362,7 +367,7 @@ def write_episode(
             DRAFT_SECTIONS,
             _check_draft,
             stage="draft",
-            on_progress=on_progress,
+            on_progress=report,
         )
         d.mkdir(parents=True, exist_ok=True)
         save(d / "draft.md", draft_text)  # kept even if the critique fails
@@ -379,7 +384,7 @@ def write_episode(
             # "Episode summary: ..." in commentary or the spoken text is no heading
             strict=("EPISODE SUMMARY",),
             stage="critique",
-            on_progress=on_progress,
+            on_progress=report,
         )
     script = _spoken(crit["Revised script"])
     # A rewrite is "not done" while its files change, so an interrupted rewrite can never
