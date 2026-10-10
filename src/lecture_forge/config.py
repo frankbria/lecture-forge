@@ -52,9 +52,8 @@ def load_settings(
     the real environment overriding it. Relative paths in either are under `root`, so the
     result doesn't depend on the folder the program runs from."""
     root = Path(root)
-    env = root / (
-        ".env" if env_file is None else env_file
-    )  # an absolute env_file stays
+    # A relative env_file is under the root too; an absolute one stays as it is.
+    env = root / (".env" if env_file is None else env_file)
     values = {**dotenv_values(env), **os.environ}
     raw = {f: values.get(var) or default for f, (var, default) in ENV.items()}
     if raw["provider"] not in PROVIDERS:
