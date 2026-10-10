@@ -24,9 +24,8 @@ from lecture_forge.write import (
     write_episode,
 )
 
-ROOT = Path(
-    "."
-)  # the CLI's project is the folder it runs in; the engine takes it explicitly
+# The CLI's project is the folder it runs in; the engine takes the root explicitly.
+ROOT = Path(".")
 
 
 def llm(

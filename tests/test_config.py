@@ -85,3 +85,13 @@ def test_absolute_paths_and_the_environment_still_win_under_a_root(
     monkeypatch.setenv("LECTURE_FORGE_OUTPUT_DIR", "/abs/out")
     s = load_settings(root=tmp_path)
     assert s.style_guide_path == tmp_path / "g.md" and s.output_dir == Path("/abs/out")
+
+
+def test_a_relative_env_file_and_home_paths_resolve_as_written(tmp_path, monkeypatch):
+    (tmp_path / "other.env").write_text("STYLE_GUIDE_PATH=~/guides/g.md\n")
+    monkeypatch.chdir(tmp_path.parent)  # not the root
+    monkeypatch.setenv("HOME", "/home/someone")
+    s = load_settings("other.env", root=tmp_path)  # relative: under the root too
+    assert s.style_guide_path == Path(
+        "/home/someone/guides/g.md"
+    )  # ~ is the home folder

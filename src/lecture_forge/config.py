@@ -52,15 +52,15 @@ def load_settings(
     the real environment overriding it. Relative paths in either are under `root`, so the
     result doesn't depend on the folder the program runs from."""
     root = Path(root)
-    values = {
-        **dotenv_values(root / ".env" if env_file is None else env_file),
-        **os.environ,
-    }
+    env = root / (
+        ".env" if env_file is None else env_file
+    )  # an absolute env_file stays
+    values = {**dotenv_values(env), **os.environ}
     raw = {f: values.get(var) or default for f, (var, default) in ENV.items()}
     if raw["provider"] not in PROVIDERS:
         raise ConfigError(
             f"Unknown LECTURE_FORGE_PROVIDER {raw['provider']!r}; use one of {sorted(PROVIDERS)}"
         )
     for f in ("style_guide_path", "output_dir"):
-        raw[f] = root / raw[f]  # an absolute path stays as it is
+        raw[f] = root / Path(raw[f]).expanduser()  # an absolute path stays as it is
     return Settings(**raw)

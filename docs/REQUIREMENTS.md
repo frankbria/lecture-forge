@@ -96,7 +96,7 @@ All three providers implement one interface: `complete(provider, system, user, p
 ## Configuration
 
 - `.env` (git-ignored): `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, optional `ELEVENLABS_MODEL_ID` (default `eleven_v3`), optional `STYLE_GUIDE_PATH`, plus `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as needed.
-- **Project root:** `.env`, `series/<slug>/` and the default style guide are found under the project root, and relative paths in `.env` (`STYLE_GUIDE_PATH`, `LECTURE_FORGE_OUTPUT_DIR`) resolve under it too. The engine takes the root explicitly (`load_settings(root=…)`, `plan.series_dir(root, slug)`), so nothing depends on the folder the program runs from. The CLI's root is the folder it runs in.
+- **Project root:** `.env`, `series/<slug>/` and the default style guide are found under the project root, and relative paths in `.env` (`STYLE_GUIDE_PATH`, `LECTURE_FORGE_OUTPUT_DIR`) resolve under it too (`~` is your home folder). The engine takes the root explicitly (`load_settings(root=…)`, `plan.series_dir(root, slug)`), so nothing depends on the folder the program runs from. The CLI's root is the folder it runs in.
 - Also in `.env`: `LECTURE_FORGE_PROVIDER` (default `claude-code`) and `LECTURE_FORGE_OUTPUT_DIR` (default `/mnt/d/Dropbox/Lectures`). There is no separate config file: `.env` holds everything, and real environment variables override it.
 - **Style guide:** this is your own prompt file, and it is **not** tracked in the repo. It is loaded from `STYLE_GUIDE_PATH`, or from `prompts/style-guide.md` (git-ignored) if that isn't set, and split by its `## Part N` headings. If it's missing, the command exits with a message saying where to put it.
 
