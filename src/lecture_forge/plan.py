@@ -316,14 +316,16 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
 def reusable_plan(
     path: Path, source: str | Path, *, root: str | Path = "."
 ) -> dict | None:
-    """The plan at `path` if it was made for `source`, None if there is no plan yet. A plan
-    for another source is refused, so a series is never written from the wrong book."""
+    """The plan at `path` if it was made for `source`, None if there is no plan yet.
+
+    Raises PlanError for a plan made for another source, so a series is never written from
+    the wrong book, and for a plan that can't be loaded (a broken one is not "no plan")."""
     if not Path(path).exists():
         return None
     plan = load_plan(path, root=root)
     planned = plan["source"].path.resolve()
-    if planned != (Path(root) / Path(source).expanduser()).resolve():
-        raise ValueError(
+    if planned != (Path(root) / source).resolve():
+        raise PlanError(
             f"{path} is a plan for {planned}; use another --series for {source}"
         )
     return plan

@@ -499,8 +499,13 @@ def test_reusable_plan_is_the_existing_plan_only_for_the_same_source(tmp_path, b
     assert plan["source"].path == book.path.resolve()
     other = tmp_path / "other.md"
     other.write_text("x\n")
-    with pytest.raises(ValueError, match="is a plan for .*use another --series for"):
+    with pytest.raises(PlanError, match="is a plan for .*use another --series for"):
         reusable_plan(out, other, root=tmp_path)
+    out.write_text(
+        "episodes: [", encoding="utf-8"
+    )  # a broken plan is an error, not "none"
+    with pytest.raises(PlanError):
+        reusable_plan(out, book.path, root=tmp_path)
 
 
 def test_reusable_plan_resolves_a_relative_source_under_the_root(
