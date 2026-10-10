@@ -801,3 +801,15 @@ def test_preflight_of_one_episode_raises_as_the_cli_does(series, tmp_path, monke
     assert [ep["n"] for ep in one.ready] == [
         2
     ] and not one.over_balance  # balance unknown
+
+
+def test_preflight_over_balance_boundary(series, tmp_path, monkeypatch):
+    plan = load_plan(series / "plan.yaml")
+    s = settings(tmp_path)
+    monkeypatch.setattr(r, "characters_left", lambda s: None)
+    need = r.preflight(plan, series, s, episode=None, force=False).estimate
+    for left, over in ((need, False), (need - 1, True)):
+        monkeypatch.setattr(r, "characters_left", lambda s, left=left: left)
+        assert (
+            r.preflight(plan, series, s, episode=None, force=False).over_balance is over
+        )
