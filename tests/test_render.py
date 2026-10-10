@@ -711,6 +711,7 @@ def test_ffmpeg_failure_leaves_no_partial_or_published_file(
     )
     with pytest.raises(RenderError, match="ffmpeg failed"):
         run(series, tmp_path, tts)
+    assert len(tts.calls) > 1  # the episode really had a piece after the first
     out = tmp_path / "Lectures"
     assert not list(out.rglob("*.mp3")) and not list(out.rglob("*.part"))
     assert not (episode_dir(series, 1) / "render.json").exists()
@@ -743,3 +744,27 @@ def test_rendering_twice_spends_nothing_the_second_time(project, capsys):
     out = capsys.readouterr().out
     assert len(tts.calls) == paid and paid > 0
     assert "already rendered" in out and "0 characters to synthesize" in out
+
+
+def test_a_cache_only_rebuild_without_ffmpeg_fails_without_paying(
+    series, tmp_path, beep, monkeypatch
+):
+    run(series, tmp_path, FakeTTS(beep))  # every piece cached
+    monkeypatch.setenv("PATH", "")
+    tts = FakeTTS(beep)
+    with pytest.raises(RenderError, match="ffmpeg is not installed"):
+        run(series, tmp_path, tts, force=True)
+    assert tts.calls == []
+
+
+def test_render_without_ffmpeg_fails_before_asking_to_spend(
+    project, capsys, monkeypatch
+):
+    _, tts = project
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("asked to spend"))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert main(["render", "algebra", "--all"]) == 1
+    out, err = capsys.readouterr()
+    assert "ffmpeg is not installed" in err and tts.calls == []
+    assert "characters to synthesize" in out  # the free cost preview still shows
