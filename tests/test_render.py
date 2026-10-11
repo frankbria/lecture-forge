@@ -261,7 +261,7 @@ def test_output_dir_is_never_invented_when_its_drive_is_missing(series, tmp_path
     assert not (tmp_path / "no-drive").exists()
 
 
-def test_cost_counts_only_pieces_not_yet_paid_for(series, tmp_path, beep):
+def test_cost_counts_only_pieces_not_yet_paid_for(series, tmp_path, beep, caplog):
     plan = load_plan(series / "plan.yaml")
     s = settings(tmp_path)
     ep = plan["episodes"][0]
@@ -271,6 +271,7 @@ def test_cost_counts_only_pieces_not_yet_paid_for(series, tmp_path, beep):
     with pytest.raises(RenderError):
         render_episode(plan, ep, series, s, FakeTTS(beep, fail_at=1))
     assert r.cost(plan, ep, series, s) == full - len(split_text(script, 5000)[0])
+    assert not caplog.messages  # a piece that was never cached isn't a bad one
 
 
 def test_cost_is_zero_for_a_rendered_episode_even_without_its_piece_cache(
@@ -426,6 +427,8 @@ def test_real_elevenlabs_returns_playable_mp3(tmp_path):
     (tmp_path / "x.mp3").write_bytes(audio)
     duration, _ = probe(tmp_path / "x.mp3")
     assert 1.5 < duration < 15 and request_id
+    # or every real piece would be refused, and paid for again on each retry
+    assert r._playable(tmp_path / "x.mp3")
 
 
 def test_renamed_episode_replaces_its_old_mp3_instead_of_duplicating_it(
