@@ -1089,7 +1089,6 @@ def test_on_old_recap_says_which_later_episodes_are_stale(tmp_path, book):
 
 OLD = "built on the old summary and puzzle"
 FORCE = "with --force if the recap matters"
-AGAIN = "again (no --force needed)"
 
 
 @pytest.mark.parametrize(
@@ -1100,14 +1099,14 @@ AGAIN = "again (no --force needed)"
             {3: [4, 5]},
             [
                 f"episodes 2 and 4 are {OLD}; rewrite them {FORCE}",
-                f"episode 3 is {OLD} and no longer matches the plan; write it {AGAIN}",
+                f"episode 3 is {OLD} and no longer matches the plan; write it again (no --force needed)",
             ],
         ),
         (
             {2: [2, 4], 3: [4, 5]},
             [
                 f"episode 4 is {OLD}; rewrite it {FORCE}",
-                f"episodes 2 and 3 are {OLD} and no longer match the plan; write them {AGAIN}",
+                f"episodes 2 and 3 are {OLD} and no longer match the plan; write them again in order (no --force needed)",
             ],
         ),
     ],
@@ -1124,7 +1123,8 @@ def test_write_words_the_old_recap_note_by_number_and_state(
     capsys.readouterr()
     assert main(["write", "algebra", "--episode", "1", "--force", "--auto"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert [line[8:] for line in out if line.startswith("  note: ")] == notes
+    found = [line for line in out if line.startswith("  note: ")]
+    assert [line.removeprefix("  note: ") for line in found] == notes
 
 
 def test_on_old_recap_counts_a_lost_script_written_again_like_a_rewrite(tmp_path, book):

@@ -62,7 +62,7 @@ OLD_RECAP = {
     ),
     "stale": (
         f"is {BUILT} and no longer matches the plan; write it again (no --force needed)",
-        f"are {BUILT} and no longer match the plan; write them again (no --force needed)",
+        f"are {BUILT} and no longer match the plan; write them again in order (no --force needed)",
     ),
 }
 
