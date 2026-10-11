@@ -24,6 +24,7 @@ uv run ruff format --check .
 
 - `cli.py`: argparse commands (`outline`, `plan`, `write`, `render`, `run`). A front end only: it formats, prints and prompts. Decisions belong in the engine modules below, so a GUI can call them too (REQUIREMENTS, Goals).
 - `config.py`: settings from `.env`, overridden by the environment
+- `errors.py`: `advised`, which adds neutral advice to an error and names the remedy, so a front end can say it its own way (`cli.ADVICE`)
 - `source.py`: PDF/text loading, outline, PDF slicing
 - `style_guide.py`: splits the owner's style guide into its parts
 - `providers.py`: LLM providers (claude-code, anthropic, openai), the retry policy, and provider switching (`complete_switching`, with a `choose` callback)
@@ -39,6 +40,7 @@ uv run ruff format --check .
 - `# fmt: skip` keeps compact multi-argument calls on one line.
 - The engine never prints or prompts: it returns data, raises domain exceptions, or takes callbacks.
 - Errors are domain exceptions (`PlanError`, `WriteError`, `RenderError`, `ProviderError`, `ConfigError`) that `cli.main` prints as `error: …`.
+- Engine messages name no CLI flag or command (`tests/test_errors.py` scans for them). Where the remedy is a flag, raise the error through `errors.advised` and put the CLI's words in `cli.ADVICE`.
 
 ## Read before working
 

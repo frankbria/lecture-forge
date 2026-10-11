@@ -245,7 +245,7 @@ def test_voice_change_invalidates_the_cache(series, tmp_path, beep):
 
 
 def test_unwritten_episode_cannot_be_rendered(series, tmp_path, beep):
-    with pytest.raises(RenderError, match="write episode 3 first"):
+    with pytest.raises(RenderError, match="^write episode 3 first$"):
         run(series, tmp_path, FakeTTS(beep), n=3)
 
 
@@ -524,9 +524,7 @@ def test_script_written_for_another_range_is_never_rendered(series, tmp_path, be
     with pytest.raises(RenderError, match="no longer matches") as e:
         run(series, tmp_path, tts)
     assert "written for lines 2-2, the plan now says lines 1-1" in str(e.value)
-    assert str(e.value).endswith(
-        "lecture-forge write algebra --episode 1"
-    )  # no --force needed
+    assert str(e.value).endswith("the plan now says lines 1-1); rewrite it")
     assert tts.calls == []
 
 
@@ -1198,3 +1196,16 @@ def test_an_interrupted_join_leaves_no_temp_file(series, tmp_path, beep, monkeyp
     with pytest.raises(KeyboardInterrupt):
         run(series, tmp_path, FakeTTS(beep))
     assert not [p for p in (tmp_path / "Lectures").rglob("*") if p.is_file()]
+
+
+def test_render_errors_name_the_cli_command(project, capsys):
+    root, _ = project
+    assert main(["render", "algebra", "--episode", "3", "--yes"]) == 1
+    assert capsys.readouterr().err == (
+        "error: write episode 3 first (lecture-forge write)\n"
+    )
+    _stale(root / "series" / "algebra")
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 1
+    assert capsys.readouterr().err.endswith(
+        "); rewrite it: lecture-forge write algebra --episode 1\n"
+    )

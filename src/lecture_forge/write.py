@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from lecture_forge.errors import advised
 from lecture_forge.plan import Call, load_plan, save
 from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.source import extract_text, slice_pdf
@@ -335,8 +336,10 @@ def episodes_to_write(
         if not todo:
             raise ValueError(f"the plan has no episode {episode}")
         if script_state(series_dir, plan, todo[0]) == "current" and not force:
-            raise FileExistsError(
-                f"episode {episode} is already written; pass --force to rewrite it"
+            raise advised(
+                FileExistsError(f"episode {episode} is already written"),
+                "; it is rewritten only if you ask for that",
+                "rewrite_episode",
             )
     else:
         todo = plan["episodes"]

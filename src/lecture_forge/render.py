@@ -18,6 +18,7 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs.core.api_error import ApiError
 
 from lecture_forge.config import Settings
+from lecture_forge.errors import advised
 from lecture_forge.plan import save
 from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.providers import retryable_status
@@ -208,12 +209,17 @@ def characters_left(settings: Settings) -> int | None:
 def _script(series_dir: Path, plan: dict, ep: dict) -> str:
     n, state = ep["n"], script_state(series_dir, plan, ep)
     if state == "missing":
-        raise RenderError(f"write episode {n} first (lecture-forge write)")
+        raise advised(RenderError(f"write episode {n} first"), "", "write_episode")
     if state == "stale":
-        raise RenderError(
-            f"episode {n}'s script no longer matches the plan "
-            f"({stale_reason(series_dir, plan, ep)}); rewrite it: "
-            f"lecture-forge write {Path(series_dir).name} --episode {n}"
+        raise advised(
+            RenderError(
+                f"episode {n}'s script no longer matches the plan "
+                f"({stale_reason(series_dir, plan, ep)})"
+            ),
+            "; rewrite it",
+            "rewrite_stale",
+            series=Path(series_dir).name,
+            episode=n,
         )
     return (episode_dir(series_dir, n) / "script.txt").read_text(encoding="utf-8")
 
@@ -374,7 +380,7 @@ def preflight(
     episode: int | None,
     force: bool,
 ) -> Preflight:
-    """The cost of rendering one episode or every written one. With --all, unwritten and
+    """The cost of rendering one episode or every written one. Asked for all, unwritten and
     stale episodes are skipped; one requested episode raises why it can't render instead."""
     if episode is not None:
         todo = [e for e in plan["episodes"] if e["n"] == episode]

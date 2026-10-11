@@ -1122,3 +1122,20 @@ def test_write_episode_reports_a_critique_repair_round(tmp_path, book):
     assert [(e.stage, e.note) for e in events] == [
         ("draft", ""), ("critique", ""), ("critique", "repair round")
     ]  # fmt: skip
+
+
+def test_write_one_written_episode_names_the_cli_flag(project, capsys):
+    root, _ = project
+    assert main(["write", "algebra", "--episode", "1", "--auto"]) == 0
+    capsys.readouterr()
+    assert main(["write", "algebra", "--episode", "1", "--auto"]) == 1
+    assert capsys.readouterr().err == (
+        "error: episode 1 is already written; pass --force to rewrite it\n"
+    )
+    sdir = root / "series" / "algebra"
+    with pytest.raises(FileExistsError) as e:  # the engine names no flag
+        episodes_to_write(load_plan(sdir / "plan.yaml"), sdir, episode=1, force=False)
+    assert (
+        str(e.value)
+        == "episode 1 is already written; it is rewritten only if you ask for that"
+    )
