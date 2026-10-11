@@ -1181,3 +1181,20 @@ def test_an_episode_that_cannot_be_published_leaves_no_temp_file(
     with pytest.raises(OSError):
         run(series, tmp_path, FakeTTS(beep), force=True)
     assert [p.name for p in out.parent.iterdir()] == [out.name]
+
+
+def test_an_interrupted_join_leaves_no_temp_file(series, tmp_path, beep, monkeypatch):
+    real_run = subprocess.run
+
+    def run_then_interrupt(cmd, **kw):
+        proc = real_run(cmd, **kw)
+        if (
+            "concat" in cmd
+        ):  # Ctrl-C as the join ends: ffmpeg has written the .part file
+            raise KeyboardInterrupt
+        return proc
+
+    monkeypatch.setattr(r.subprocess, "run", run_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        run(series, tmp_path, FakeTTS(beep))
+    assert not [p for p in (tmp_path / "Lectures").rglob("*") if p.is_file()]
