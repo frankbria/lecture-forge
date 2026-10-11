@@ -214,7 +214,11 @@ def _text(value) -> str:
     return "" if value is None else str(value)
 
 
-def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> Path:
+def write_plan(
+    plan: dict, src: Source, path: Path, *, force: bool = False, continues: str = ""
+) -> Path:
+    """Write plan.yaml. `continues` names the series whose last episode this one's first
+    episode recaps."""
     if path.exists() and not force:
         raise FileExistsError(
             f"{path} exists and may hold your edits; pass --force to replace it"
@@ -224,6 +228,7 @@ def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> P
         "title": _text(plan.get("title")) or src.path.stem,
         "author": _text(plan.get("author")),
         "source": str(src.path.resolve()),  # write may run from another directory
+        **({"continues": continues} if continues else {}),
         "episodes": [
             {
                 "n": n,
@@ -246,8 +251,9 @@ def write_plan(plan: dict, src: Source, path: Path, *, force: bool = False) -> P
 def load_plan(path: Path, *, root: str | Path = ".") -> dict:
     """Read a (possibly hand-edited) plan.yaml, checking everything `write` relies on.
 
-    Returns {title, author, source: Source, unit, episodes: [{n, title, central_idea,
-    start, end, listener_notes}]} with episodes ordered by n.
+    Returns {title, author, source: Source, continues, unit, episodes: [{n, title,
+    central_idea, start, end, listener_notes}]} with episodes ordered by n. `continues` is
+    the series this one picks up from, "" for none.
     """
     try:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
@@ -270,6 +276,15 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
         ) from e
     unit = "pages" if src.kind == "pdf" else "lines"
     errors, episodes, seen = [], [], set()
+    continues = data.get("continues")  # no key, or an empty one: continues nothing
+    if continues is not None and (
+        not isinstance(continues, str)
+        or not SLUG.fullmatch(continues)
+        or continues == Path(path).absolute().parent.name  # its own folder
+    ):
+        errors.append(
+            f"continues must be the name of another series, got {continues!r}"
+        )
     for i, e in enumerate(data["episodes"], 1):
         where = f"episode entry {i}"
         if not isinstance(e, dict):
@@ -312,6 +327,7 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
         "title": _text(data.get("title")) or src.path.stem,
         "author": _text(data.get("author")),
         "source": src,
+        "continues": continues or "",
         "unit": unit,
         "episodes": sorted(episodes, key=lambda e: e["n"]),
     }

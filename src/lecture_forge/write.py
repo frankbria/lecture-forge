@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from lecture_forge.plan import Call, save
+from lecture_forge.plan import Call, load_plan, save
 from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.source import extract_text, slice_pdf
 from lecture_forge.style_guide import StyleGuide
@@ -279,11 +279,39 @@ def _split_suggestion(notes: str) -> str:
     return ""
 
 
+def _recap(episode: Path) -> tuple[str, str]:
+    summary, puzzle = (
+        (episode / f).read_text(encoding="utf-8").strip()
+        for f in ("summary.md", "puzzle_answer.md")
+    )
+    return summary, puzzle
+
+
+def _continued(slug: str, series_dir: Path) -> tuple[str, str]:
+    """(summary, puzzle and answer) of the last episode of series `slug`, which the first
+    episode of the series at series_dir continues from. It must be written."""
+    other = Path(series_dir).parent / slug
+    if not (other / "plan.yaml").is_file():
+        raise WriteError(
+            f"series {slug} (continued from) isn't planned: {other / 'plan.yaml'} not found"
+        )
+    # Series live at <root>/series/<slug>, and a relative source is under the root.
+    theirs = load_plan(other / "plan.yaml", root=other.parent.parent)
+    last = theirs["episodes"][-1:]
+    if not last or script_state(other, theirs, last[0]) != "current":
+        raise WriteError(
+            f"series {slug} (continued from) has no finished last episode; write it first"
+        )
+    summary, puzzle = _recap(episode_dir(other, last[0]["n"]))
+    return f"(From the previous series, {theirs['title']}.) {summary}", puzzle
+
+
 def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
-    """(summary, puzzle and answer) of the episode before this one, which must be written."""
+    """(summary, puzzle and answer) of the episode before this one, which must be written.
+    A first episode has none, unless its series continues another one."""
     earlier = [e for e in plan["episodes"] if e["n"] < ep["n"]]
     if not earlier:
-        return None
+        return _continued(plan["continues"], series_dir) if plan["continues"] else None
     n = earlier[-1]["n"]
     state = script_state(series_dir, plan, earlier[-1])
     if state == "missing":
@@ -294,12 +322,7 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
         raise WriteError(
             f"rewrite episode {n} first: its script no longer matches the plan"
         )
-    prev = episode_dir(series_dir, n)
-    summary, puzzle = (
-        (prev / f).read_text(encoding="utf-8").strip()
-        for f in ("summary.md", "puzzle_answer.md")
-    )
-    return summary, puzzle
+    return _recap(episode_dir(series_dir, n))
 
 
 def episodes_to_write(
