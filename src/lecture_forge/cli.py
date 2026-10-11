@@ -85,7 +85,7 @@ def _check_series(slug: str) -> Path:
 
 
 def _continues(args: argparse.Namespace) -> str:
-    """--continues, checked before an LLM call is spent on a plan that write would refuse."""
+    """--continues, checked before an LLM call is spent: another series, already planned."""
     slug = args.continues
     if slug is None:
         return ""

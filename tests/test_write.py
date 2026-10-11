@@ -386,15 +386,19 @@ def test_a_moved_source_in_the_continued_series_is_reported(tmp_path, book):
         run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
 
 
-@pytest.mark.parametrize("value", ["../x", "Ch3", 3, ["ch3"], "algebra"])
+@pytest.mark.parametrize(
+    "value", ["../x", "ch3/x", "Ch3", 3, ["ch3"], "algebra", 0, False, ""]
+)
 def test_load_plan_rejects_a_continues_that_is_no_other_series(tmp_path, book, value):
     path = make_plan_file(tmp_path, book, [(1, [1, 3])], continues=value)
     with pytest.raises(PlanError, match="continues must be the name of another series"):
         load_plan(path)
 
 
-def test_load_plan_without_continues_continues_nothing(tmp_path, book):
-    assert load_plan(make_plan_file(tmp_path, book, [(1, [1, 3])]))["continues"] == ""
+@pytest.mark.parametrize("top", [{}, {"continues": None}])
+def test_load_plan_without_continues_continues_nothing(tmp_path, book, top):
+    path = make_plan_file(tmp_path, book, [(1, [1, 3])], **top)
+    assert load_plan(path)["continues"] == ""
 
 
 def test_critique_can_replace_the_puzzle(tmp_path, book):

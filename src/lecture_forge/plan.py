@@ -276,11 +276,11 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
         ) from e
     unit = "pages" if src.kind == "pdf" else "lines"
     errors, episodes, seen = [], [], set()
-    continues = data.get("continues") or ""
-    if continues and (
+    continues = data.get("continues")  # no key, or an empty one: continues nothing
+    if continues is not None and (
         not isinstance(continues, str)
         or not SLUG.fullmatch(continues)
-        or continues == Path(path).resolve().parent.name  # its own folder
+        or continues == Path(path).absolute().parent.name  # its own folder
     ):
         errors.append(
             f"continues must be the name of another series, got {continues!r}"
@@ -327,7 +327,7 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
         "title": _text(data.get("title")) or src.path.stem,
         "author": _text(data.get("author")),
         "source": src,
-        "continues": continues,
+        "continues": continues or "",
         "unit": unit,
         "episodes": sorted(episodes, key=lambda e: e["n"]),
     }

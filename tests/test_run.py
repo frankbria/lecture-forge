@@ -110,7 +110,7 @@ def test_plan_continues_writes_the_other_series_into_the_plan(project):
     assert continues_of(root, "ch4") == "ch3" and continues_of(root, "ch3") is None
 
 
-@pytest.mark.parametrize("value", ["missing", "ch4", "../ch3", ""])
+@pytest.mark.parametrize("value", ["missing", "ch4", "../ch3", "ch3/x", ""])
 @pytest.mark.parametrize("command", ["plan", "run"])
 def test_continues_must_be_another_planned_series_before_any_llm_call(
     project, capsys, command, value
