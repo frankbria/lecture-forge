@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_source import scanned_pdf
+from test_source import BOOK_TOC, scanned_pdf, toc_pdf
 
 from lecture_forge.cli import main
 
@@ -13,6 +13,26 @@ def test_outline_prints_headings_indented(tmp_path, capsys):
     p.write_text("# A\n## B\n")
     assert main(["outline", str(p)]) == 0
     assert capsys.readouterr().out == "n.md: 2 lines\nA  [1]\n  B  [2]\n"
+
+
+def test_outline_numbers_the_chapters_of_a_pdf(tmp_path, capsys):
+    assert main(["outline", str(toc_pdf(tmp_path / "book.pdf", 10, BOOK_TOC))]) == 0
+    assert capsys.readouterr().out == (
+        "book.pdf: 10 pages\n1. Ch 1  [1]\n  1.1  [2]\n2. Ch 2  [5]\n3. Index  [9]\n"
+    )
+
+
+def test_outline_leaves_a_bookmark_that_is_no_chapter_unnumbered(tmp_path, capsys):
+    toc = [[1, "Cover", 1], [1, "Cover", 1], [2, "Ch 1", 3], [1, "Ch 1", 3], [1, "Back", 2], [1, "Ch 2", 6]]  # fmt: skip
+    main(["outline", str(toc_pdf(tmp_path / "book.pdf", 8, toc))])
+    assert capsys.readouterr().out.splitlines()[1:] == [
+        "1. Cover  [1]",
+        "Cover  [1]",
+        "  Ch 1  [3]",
+        "2. Ch 1  [3]",
+        "Back  [2]",
+        "3. Ch 2  [6]",
+    ]
 
 
 def test_outline_without_headings_says_so(tmp_path, capsys):

@@ -17,7 +17,13 @@ from lecture_forge.plan import (
     write_plan,
 )
 from lecture_forge.providers import ProviderError, complete_switching
-from lecture_forge.source import Source, open_source, outline, scanned_note
+from lecture_forge.source import (
+    Source,
+    chapters,
+    open_source,
+    outline,
+    scanned_note,
+)
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
 from lecture_forge.write import (
     WriteError,
@@ -65,8 +71,16 @@ def cmd_outline(args: argparse.Namespace) -> None:
     entries = outline(src)
     if not entries:
         print("(no bookmarks or headings found)")
+    # The numbers --chapter takes. A top-level bookmark that starts no chapter is on an
+    # earlier page than the next chapter, so the page tells the two apart.
+    starts = [start for _, start, _ in chapters(src)]
+    n = 0
     for level, title, loc in entries:
-        print(f"{'  ' * (level - 1)}{title}  [{loc}]")
+        number = ""
+        if level == 1 and starts[n : n + 1] == [loc]:
+            n += 1
+            number = f"{n}. "
+        print(f"{'  ' * (level - 1)}{number}{title}  [{loc}]")
 
 
 def _range(text: str | None, src: Source) -> tuple[int, int]:
@@ -77,6 +91,31 @@ def _range(text: str | None, src: Source) -> tuple[int, int]:
     start, end = int(m[1]), int(m[2])
     if not 1 <= start <= end <= src.length:
         raise ValueError(f"Bad range {start}-{end}: {src.path.name} has 1-{src.length}")
+    return start, end
+
+
+def _chapter(n: int, src: Source) -> tuple[str, int, int]:
+    """--chapter N: (title, first page, last page) of the Nth top-level bookmark."""
+    found = chapters(src)
+    if not found:
+        raise ValueError(
+            f"{src.path.name} has no chapter bookmarks; use --range "
+            "(see lecture-forge outline)"
+        )
+    if not 1 <= n <= len(found):
+        raise ValueError(
+            f"--chapter {n}: {src.path.name} has chapters 1-{len(found)} "
+            "(see lecture-forge outline)"
+        )
+    return found[n - 1]
+
+
+def _part(args: argparse.Namespace, src: Source) -> tuple[int, int]:
+    """The (start, end) --range or --chapter asks for: the whole source without them."""
+    if args.chapter is None:
+        return _range(args.range, src)
+    title, start, end = _chapter(args.chapter, src)
+    print(f"Chapter {args.chapter}: {title}, pages {start}-{end}")
     return start, end
 
 
@@ -124,7 +163,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
     settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
-    start, end = _range(args.range, src)
+    start, end = _part(args, src)
     call = _provider_call(settings, args.auto)
 
     unit = "pages" if src.kind == "pdf" else "lines"
@@ -252,7 +291,12 @@ def cmd_run(args: argparse.Namespace) -> None:
     settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
     settings.require("voice_id")
     continues = _continues(args)
-    if (plan := reusable_plan(plan_path, args.source, root=ROOT)) is not None:
+    part = None
+    if plan_path.exists() and (args.range, args.chapter) != (None, None):
+        # or a mistyped --chapter would write and render the chapter planned before
+        part = _part(args, open_source(args.source))
+    plan = reusable_plan(plan_path, args.source, root=ROOT, part=part)
+    if plan is not None:
         if continues and plan["continues"] != continues:
             # or the series would be written and rendered without the recap asked for
             raise ValueError(
@@ -263,7 +307,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         cmd_plan(argparse.Namespace(
             source=args.source, series=args.series, range=args.range, force=False,
-            auto=args.auto, continues=args.continues,
+            auto=args.auto, continues=args.continues, chapter=args.chapter,
         ))  # fmt: skip
         if not args.auto:  # the approval gate: review the plan, then run again
             print("Run the same command again to write and render, or pass --auto.")
@@ -287,7 +331,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--series", required=True, help="name for this series, e.g. topology"
     )
-    p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part = p.add_mutually_exclusive_group()
+    part.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part.add_argument(
+        "--chapter",
+        type=int,
+        metavar="N",
+        help="only plan the Nth top-level bookmark of a PDF (outline numbers them)",
+    )
     p.add_argument(
         "--continues",
         metavar="SERIES",
@@ -335,7 +386,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--series", required=True, help="name for this series, e.g. topology"
     )
-    p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part = p.add_mutually_exclusive_group()
+    part.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part.add_argument(
+        "--chapter",
+        type=int,
+        metavar="N",
+        help="only plan the Nth top-level bookmark of a PDF (outline numbers them)",
+    )
     p.add_argument(
         "--continues",
         metavar="SERIES",

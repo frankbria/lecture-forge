@@ -2,6 +2,7 @@ import pytest
 import yaml
 from test_plan import episode, plan_json
 from test_render import FakeTTS, beep  # noqa: F401  (beep is a fixture)
+from test_source import toc_pdf
 from test_write import TEMPLATE, critique_reply, draft_reply
 
 from lecture_forge import providers
@@ -92,6 +93,55 @@ def test_run_checks_elevenlabs_settings_before_any_llm_call(
     monkeypatch.delenv("ELEVENLABS_VOICE_ID")
     assert main(["run", str(notes), "--series", "alg", "--auto", "--yes"]) == 1
     assert "ELEVENLABS_VOICE_ID" in capsys.readouterr().err and llm == []
+
+
+def test_run_chapter_plans_that_bookmarks_pages(project, capsys):
+    root, _, llm, _ = project
+    book = toc_pdf(root / "book.pdf", 6, [[1, "Ch 1", 1], [1, "Ch 2", 5]])
+    assert main(["run", str(book), "--series", "ch1", "--chapter", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "Chapter 1: Ch 1, pages 1-4\nPlanning book.pdf pages 1-4 with" in out
+    assert out.count("Chapter 1:") == 1
+    assert "Run the same command again" in out and len(llm) == 1
+
+
+def test_run_rejects_a_chapter_the_book_does_not_have(project, capsys):
+    root, _, llm, _ = project
+    book = toc_pdf(root / "book.pdf", 6, [[1, "Ch 1", 1], [1, "Ch 2", 5]])
+    args = ["run", str(book), "--series", "ch3", "--chapter", "3", "--auto", "--yes"]
+    assert main(args) == 1
+    assert "book.pdf has chapters 1-2" in capsys.readouterr().err
+    assert llm == [] and not (root / "series/ch3/plan.yaml").exists()
+
+
+def test_run_refuses_a_plan_made_for_another_chapter(project, capsys):
+    root, _, llm, tts = project
+    book = toc_pdf(root / "book.pdf", 6, [[1, "Ch 1", 1], [1, "Ch 2", 5]])
+    main(["run", str(book), "--series", "ch1", "--chapter", "1"])
+    capsys.readouterr()
+    for part, where in (["--chapter", "2"], "5-6"), (["--range", "5-5"], "5-5"):
+        args = ["run", str(book), "--series", "ch1", *part, "--auto", "--yes"]
+        assert main(args) == 1
+        err = capsys.readouterr().err
+        assert f"plan.yaml has no episode in pages {where}; use another --series" in err
+    assert main(["run", str(book), "--series", "ch1", "--chapter", "3", "--yes"]) == 1
+    assert "book.pdf has chapters 1-2" in capsys.readouterr().err
+    assert len(llm) == 1 and tts.calls == []
+    assert not (root / "series/ch1/episodes").exists()
+
+
+def test_run_resumes_a_plan_for_the_chapter_asked_for(project, capsys):
+    root, _, llm, _ = project
+    book = toc_pdf(root / "book.pdf", 6, [[1, "Ch 1", 1], [1, "Ch 2", 5]])
+    main(["run", str(book), "--series", "ch1", "--chapter", "1"])
+    assert main(["run", str(book), "--series", "ch1", "--chapter", "1", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "Chapter 1: Ch 1, pages 1-4\nUsing the existing" in out
+    assert len(llm) == 5 and mp3s(root) == ["01 - Ep 1.mp3", "02 - Ep 3.mp3"]
+    # a range that only touches the plan is the same part of the book, edited
+    assert main(["run", str(book), "--series", "ch1", "--range", "4-6", "--yes"]) == 0
+    assert main(["run", str(book), "--series", "ch1", "--yes"]) == 0  # nothing asked
+    assert len(llm) == 5
 
 
 # --- --continues ---------------------------------------------------------------------

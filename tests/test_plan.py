@@ -5,7 +5,7 @@ import shutil
 import pymupdf
 import pytest
 import yaml
-from test_source import scanned_pdf
+from test_source import BOOK_TOC, scanned_pdf, toc_pdf
 
 from lecture_forge import providers
 from lecture_forge.cli import main
@@ -328,6 +328,66 @@ def test_plan_command_rejects_bad_range(project, book, rng, capsys):
     assert "range" in capsys.readouterr().err.lower()
 
 
+@pytest.mark.parametrize(
+    "n,title,start,end", [(1, "Ch 1", 1, 4), (2, "Ch 2", 5, 8), (3, "Index", 9, 10)]
+)
+def test_plan_command_chapter_plans_that_bookmarks_pages(
+    project, tmp_path, monkeypatch, capsys, n, title, start, end
+):
+    seen = {}
+
+    def planner(system, user, pdf, settings):
+        seen["pages"], seen["user"] = pymupdf.open(pdf).page_count, user
+        return plan_json(episode(start, end))
+
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", planner)
+    book = toc_pdf(tmp_path / "book.pdf", 10, BOOK_TOC)
+    args = ["plan", str(book), "--series", "s", "--chapter", str(n), "--auto"]
+    assert main(args) == 0
+    where = f"pages {start}-{end}"
+    out = capsys.readouterr().out
+    assert f"Chapter {n}: {title}, {where}\nPlanning book.pdf {where} with" in out
+    assert seen["pages"] == end - start + 1
+    assert f"Source: book.pdf. Plan {where}." in seen["user"]
+    plan = load_plan(project / "series/s/plan.yaml")
+    assert [(e["start"], e["end"]) for e in plan["episodes"]] == [(start, end)]
+
+
+@pytest.mark.parametrize("n", ["0", "4", "9", "-1"])
+def test_plan_command_rejects_a_chapter_the_book_does_not_have(
+    project, tmp_path, monkeypatch, n, capsys
+):
+    calls = []
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", lambda *a: calls.append(a))
+    book = toc_pdf(tmp_path / "book.pdf", 10, BOOK_TOC)
+    assert main(["plan", str(book), "--series", "s", f"--chapter={n}", "--auto"]) == 1
+    err = capsys.readouterr().err
+    assert f"--chapter {n}" in err and "book.pdf has chapters 1-3" in err
+    assert calls == [] and not (project / "series/s/plan.yaml").exists()
+
+
+def test_plan_command_chapter_needs_a_pdf_with_bookmarks(
+    project, book, notes, monkeypatch, capsys
+):
+    calls = []
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", lambda *a: calls.append(a))
+    for src in (book, notes):  # a PDF without bookmarks, and Markdown with headings
+        args = ["plan", str(src.path), "--series", "s", "--chapter", "1", "--auto"]
+        assert main(args) == 1
+        err = capsys.readouterr().err
+        assert f"{src.path.name} has no chapter bookmarks; use --range" in err
+    assert calls == []
+
+
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_chapter_and_range_cannot_be_given_together(project, book, command, capsys):
+    args = [command, str(book.path), "--series", "s", "--chapter", "1", "--range", "1-2"]  # fmt: skip
+    with pytest.raises(SystemExit) as e:
+        main(args)
+    assert e.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
 def test_plan_command_reports_provider_failure(project, book, monkeypatch, capsys):
     def down(*a):
         raise providers.ProviderError("anthropic", "400 bad request")
@@ -536,6 +596,20 @@ def test_reusable_plan_is_the_existing_plan_only_for_the_same_source(tmp_path, b
     )  # a broken plan is an error, not "none"
     with pytest.raises(PlanError):
         reusable_plan(out, book.path, root=tmp_path)
+
+
+def test_reusable_plan_must_hold_an_episode_in_the_part_asked_for(tmp_path, book):
+    from lecture_forge.plan import reusable_plan
+
+    out = tmp_path / "series" / "s" / "plan.yaml"
+    assert reusable_plan(out, book.path, root=tmp_path, part=(5, 6)) is None
+    reply = plan_json(episode(2, 3), episode(4, 4))
+    write_plan(make_plan(book, GUIDE, 2, 4, lambda s, u, p: reply), book, out)
+    for part in [(2, 4), (1, 2), (4, 6), (3, 3), (1, 6)]:  # the edges count
+        assert reusable_plan(out, book.path, root=tmp_path, part=part) is not None
+    for part in [(1, 1), (5, 6)]:
+        with pytest.raises(PlanError, match=f"no episode in pages {part[0]}-{part[1]}"):
+            reusable_plan(out, book.path, root=tmp_path, part=part)
 
 
 def test_reusable_plan_resolves_a_relative_source_under_the_root(
