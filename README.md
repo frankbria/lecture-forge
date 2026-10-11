@@ -20,6 +20,7 @@ lecture-forge write topology --episode 3 --force   # rewrite one episode
 lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\<series title> (asks first)
 lecture-forge run chapter3.pdf --series topo3   # plan, stop for review; run it again to write and render
 lecture-forge run chapter3.pdf --series topo3 --auto --yes   # everything, no stops, spending included
+lecture-forge run book.pdf --series ch4 --range 186-240 --continues ch3   # opens by recapping ch3
 ```
 
 `lforge` is the same command under a shorter name: `lforge outline book.pdf`. Help and usage errors show the name you typed. If you installed before the alias existed, run `uv tool install --editable . --force` once to get it.
@@ -27,6 +28,8 @@ lecture-forge run chapter3.pdf --series topo3 --auto --yes   # everything, no st
 The planner reads the content itself and breaks at clean concept boundaries, one central idea and at most 30 minutes per episode. Each episode records why it ends where it does.
 
 `write` drafts each episode under your style guide, critiques and revises it against the source, and saves `series/<slug>/episodes/NN/script.txt` (spoken text only) plus the production notes, puzzle answer and summary that the next episode builds on. Read the scripts before rendering.
+
+A book done one chapter per series doesn't have to open each chapter cold. `--continues ch3` on `plan` or `run` writes `continues: ch3` into the new plan, and the first episode then recaps the last episode of series `ch3` and answers its closing puzzle. That episode has to be written first. You can also add the line to a `plan.yaml` by hand.
 
 `render` shows the estimated credits (measured from your earlier renders of that model; characters until the first render) and what's left on your ElevenLabs plan, and asks before spending (`--yes` to skip). It splits each script into pieces, caches every piece so nothing is paid for twice (a cached piece that is no longer playable audio is named in the preview and replaced), joins them with ffmpeg and writes tagged MP3s (album = series, track = episode) into your Dropbox. Requires `ffmpeg`.
 

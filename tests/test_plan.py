@@ -240,6 +240,16 @@ def test_plan_yaml_stores_free_text_fields_as_strings(book, tmp_path):
     assert e["break_reason"] == "['ends', 'here']" and e["listener_notes"] == ""
 
 
+def test_plan_yaml_keeps_the_series_it_continues(book, tmp_path):
+    plan = json.loads(plan_json(episode(1, 6)))
+    out = write_plan(plan, book, tmp_path / "series/ch4/plan.yaml", continues="ch3")
+    data = yaml.safe_load(out.read_text(encoding="utf-8"))
+    assert list(data) == ["title", "author", "source", "continues", "episodes"]
+    assert data["continues"] == "ch3" and load_plan(out)["continues"] == "ch3"
+    plain = write_plan(plan, book, tmp_path / "series/ch3/plan.yaml")
+    assert "continues" not in yaml.safe_load(plain.read_text(encoding="utf-8"))
+
+
 def test_plan_yaml_uses_lines_for_text_sources(notes, tmp_path):
     out = write_plan(
         json.loads(plan_json(episode(1, 4))), notes, tmp_path / "plan.yaml"

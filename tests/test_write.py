@@ -79,11 +79,12 @@ def book(tmp_path):
     return p
 
 
-def make_plan_file(tmp_path, source, episodes, unit="pages"):
+def make_plan_file(tmp_path, source, episodes, unit="pages", series="algebra", **top):
     data = {
         "title": "Algebra",
         "author": "A. Author",
         "source": str(source),
+        **top,
         "episodes": [
             {
                 "n": n,
@@ -97,7 +98,7 @@ def make_plan_file(tmp_path, source, episodes, unit="pages"):
             for n, rng in episodes
         ],
     }
-    path = tmp_path / "series" / "algebra" / "plan.yaml"
+    path = tmp_path / "series" / series / "plan.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return path
@@ -216,10 +217,14 @@ def test_unknown_template_fields_are_marked_not_provided():
 # --- writing an episode -------------------------------------------------------------
 
 
-def run(tmp_path, book, call, n=1, episodes=((1, [1, 3]), (2, [4, 6]))):
-    plan = load_plan(make_plan_file(tmp_path, book, list(episodes)))
+def run(
+    tmp_path, book, call, n=1, episodes=((1, [1, 3]), (2, [4, 6])), series="algebra",
+    **top,
+):  # fmt: skip
+    path = make_plan_file(tmp_path, book, list(episodes), series=series, **top)
+    plan = load_plan(path, root=tmp_path)
     ep = next(e for e in plan["episodes"] if e["n"] == n)
-    return write_episode(plan, ep, GUIDE, call, tmp_path / "series" / "algebra")
+    return write_episode(plan, ep, GUIDE, call, path.parent)
 
 
 def test_first_episode_two_passes_and_all_files(tmp_path, book):
@@ -289,6 +294,107 @@ def test_second_episode_gets_previous_summary_and_puzzle(tmp_path, book):
 def test_episode_needs_the_previous_one_written_first(tmp_path, book):
     with pytest.raises(WriteError, match="episode 1 first"):
         run(tmp_path, book, lambda s, u, p: pytest.fail("called"), n=2)
+
+
+# --- a series that continues another one --------------------------------------------
+
+
+def write_ch3(tmp_path, book, upto=2):
+    """Series ch3 ("Statics"), with its episodes up to `upto` written."""
+    replies = itertools.chain.from_iterable(
+        (
+            draft_reply(summary=f"CH3 EP{n} SUMMARY", puzzle=f"CH3 EP{n} PUZZLE"),
+            critique_reply(),
+        )
+        for n in range(1, upto + 1)
+    )
+    for n in range(1, upto + 1):
+        run(tmp_path, book, lambda s, u, p: next(replies), n=n, series="ch3", title="Statics")  # fmt: skip
+
+
+def write_ch4(tmp_path, book, n=1):
+    """Write episode n of series ch4, which continues ch3; the draft prompt it sent."""
+    seen = []
+    replies = iter(
+        [draft_reply(summary="CH4 EP1 SUMMARY", puzzle="CH4 EP1 PUZZLE"), critique_reply()]
+    )  # fmt: skip
+
+    def call(system, user, pdf):
+        seen.append(user)
+        return next(replies)
+
+    run(tmp_path, book, call, n=n, series="ch4", continues="ch3")
+    return seen[0]
+
+
+def test_first_episode_of_a_continuing_series_recaps_the_others_last(tmp_path, book):
+    write_ch3(tmp_path, book)
+    user = write_ch4(tmp_path, book)
+    assert (
+        "PREVIOUS EPISODE SUMMARY (optional):\n"
+        "(From the previous series, Statics.) CH3 EP2 SUMMARY" in user
+    )
+    assert "PREVIOUS PUZZLE AND ANSWER (optional):\nCH3 EP2 PUZZLE" in user
+    assert "(none: first" not in user and "source page 1" in user
+
+
+def test_later_episodes_of_a_continuing_series_recap_their_own_series(tmp_path, book):
+    write_ch3(tmp_path, book)
+    write_ch4(tmp_path, book)
+    user = write_ch4(tmp_path, book, n=2)
+    assert "PREVIOUS EPISODE SUMMARY (optional):\nCH4 EP1 SUMMARY" in user
+    assert "PREVIOUS PUZZLE AND ANSWER (optional):\nCH4 EP1 PUZZLE" in user
+    assert "previous series" not in user and "CH3" not in user
+
+
+def test_continuing_needs_the_other_series_last_episode_written(tmp_path, book):
+    write_ch3(tmp_path, book, upto=1)
+    with pytest.raises(WriteError, match="series ch3 .* no finished last episode"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
+
+
+def test_continuing_refuses_a_last_episode_written_for_another_range(tmp_path, book):
+    write_ch3(tmp_path, book)
+    make_plan_file(tmp_path, book, [(1, [1, 3]), (2, [5, 6])], series="ch3")
+    with pytest.raises(WriteError, match="series ch3 .* no finished last episode"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
+
+
+def test_continuing_a_series_without_episodes_or_a_plan_is_refused(tmp_path, book):
+    with pytest.raises(WriteError, match="series ch3 .* isn't planned"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
+    make_plan_file(tmp_path, book, [], series="ch3")
+    with pytest.raises(WriteError, match="series ch3 .* no finished last episode"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
+
+
+def test_the_continued_series_relative_source_is_under_the_project_root(
+    tmp_path, book, monkeypatch
+):
+    write_ch3(tmp_path, book)
+    make_plan_file(tmp_path, book.name, [(1, [1, 3]), (2, [4, 6])], series="ch3")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert "CH3 EP2 SUMMARY" in write_ch4(tmp_path, book)
+
+
+def test_a_moved_source_in_the_continued_series_is_reported(tmp_path, book):
+    write_ch3(tmp_path, book)
+    make_plan_file(tmp_path, tmp_path / "gone.pdf", [(1, [1, 3])], series="ch3")
+    with pytest.raises(PlanError, match="ch3.*gone.pdf"):
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
+
+
+@pytest.mark.parametrize("value", ["../x", "Ch3", 3, ["ch3"], "algebra"])
+def test_load_plan_rejects_a_continues_that_is_no_other_series(tmp_path, book, value):
+    path = make_plan_file(tmp_path, book, [(1, [1, 3])], continues=value)
+    with pytest.raises(PlanError, match="continues must be the name of another series"):
+        load_plan(path)
+
+
+def test_load_plan_without_continues_continues_nothing(tmp_path, book):
+    assert load_plan(make_plan_file(tmp_path, book, [(1, [1, 3])]))["continues"] == ""
 
 
 def test_critique_can_replace_the_puzzle(tmp_path, book):

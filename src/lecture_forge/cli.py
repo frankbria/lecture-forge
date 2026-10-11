@@ -8,6 +8,7 @@ from lecture_forge import render
 from lecture_forge.config import ConfigError, Settings, load_settings
 from lecture_forge.plan import (
     MAX_MINUTES,
+    SLUG,
     PlanError,
     load_plan,
     make_plan,
@@ -83,6 +84,22 @@ def _check_series(slug: str) -> Path:
     return series_dir(ROOT, slug)
 
 
+def _continues(args: argparse.Namespace) -> str:
+    """--continues, checked before an LLM call is spent on a plan that write would refuse."""
+    slug = args.continues
+    if slug is None:
+        return ""
+    if (
+        slug == args.series
+        or not SLUG.fullmatch(slug)
+        or not (series_dir(ROOT, slug) / "plan.yaml").is_file()
+    ):
+        raise ValueError(
+            f"--continues must name another series that has a plan.yaml, got {slug!r}"
+        )
+    return slug
+
+
 def _provider_call(settings: Settings, auto: bool):
     """A (system, user, pdf) -> text call that keeps a provider switch for later calls."""
     interactive = not auto and sys.stdin.isatty()
@@ -103,6 +120,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
         raise FileExistsError(
             f"{out} exists and may hold your edits; pass --force to replace it"
         )
+    continues = _continues(args)
     settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
@@ -114,7 +132,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
     if note := scanned_note(src, start, end):
         print(note)
     plan = make_plan(src, guide, start, end, call)
-    write_plan(plan, src, out, force=args.force)
+    write_plan(plan, src, out, force=args.force, continues=continues)
     episodes = plan["episodes"]
     for n, e in enumerate(episodes, 1):
         print(
@@ -233,12 +251,19 @@ def cmd_run(args: argparse.Namespace) -> None:
     settings = load_settings(root=ROOT)
     settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
     settings.require("voice_id")
-    if reusable_plan(plan_path, args.source, root=ROOT) is not None:
+    continues = _continues(args)
+    if (plan := reusable_plan(plan_path, args.source, root=ROOT)) is not None:
+        if continues and plan["continues"] != continues:
+            # or the series would be written and rendered without the recap asked for
+            raise ValueError(
+                f"{plan_path} doesn't say `continues: {continues}`; add that line to it, "
+                "or leave out --continues"
+            )
         print(f"Using the existing {plan_path} (delete it to plan again)")
     else:
         cmd_plan(argparse.Namespace(
             source=args.source, series=args.series, range=args.range, force=False,
-            auto=args.auto,
+            auto=args.auto, continues=args.continues,
         ))  # fmt: skip
         if not args.auto:  # the approval gate: review the plan, then run again
             print("Run the same command again to write and render, or pass --auto.")
@@ -263,6 +288,11 @@ def main(argv: list[str] | None = None) -> int:
         "--series", required=True, help="name for this series, e.g. topology"
     )
     p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    p.add_argument(
+        "--continues",
+        metavar="SERIES",
+        help="open by recapping the last episode of this series, e.g. ch3",
+    )
     p.add_argument("--force", action="store_true", help="replace an existing plan.yaml")
     p.add_argument(
         "--auto", action="store_true", help="never prompt (no provider switching)"
@@ -306,6 +336,11 @@ def main(argv: list[str] | None = None) -> int:
         "--series", required=True, help="name for this series, e.g. topology"
     )
     p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    p.add_argument(
+        "--continues",
+        metavar="SERIES",
+        help="open by recapping the last episode of this series, e.g. ch3",
+    )
     p.add_argument(
         "--auto",
         action="store_true",

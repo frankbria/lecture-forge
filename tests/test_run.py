@@ -1,4 +1,5 @@
 import pytest
+import yaml
 from test_plan import episode, plan_json
 from test_render import FakeTTS, beep  # noqa: F401  (beep is a fixture)
 from test_write import TEMPLATE, critique_reply, draft_reply
@@ -91,3 +92,69 @@ def test_run_checks_elevenlabs_settings_before_any_llm_call(
     monkeypatch.delenv("ELEVENLABS_VOICE_ID")
     assert main(["run", str(notes), "--series", "alg", "--auto", "--yes"]) == 1
     assert "ELEVENLABS_VOICE_ID" in capsys.readouterr().err and llm == []
+
+
+# --- --continues ---------------------------------------------------------------------
+
+
+def continues_of(root, series):
+    return yaml.safe_load((root / f"series/{series}/plan.yaml").read_text()).get(
+        "continues"
+    )
+
+
+def test_plan_continues_writes_the_other_series_into_the_plan(project):
+    root, notes, _, _ = project
+    assert main(["plan", str(notes), "--series", "ch3"]) == 0
+    assert main(["plan", str(notes), "--series", "ch4", "--continues", "ch3"]) == 0
+    assert continues_of(root, "ch4") == "ch3" and continues_of(root, "ch3") is None
+
+
+@pytest.mark.parametrize("value", ["missing", "ch4", "../ch3", ""])
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_continues_must_be_another_planned_series_before_any_llm_call(
+    project, capsys, command, value
+):
+    root, notes, llm, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    (root / "ch3").mkdir()  # what series/../ch3 would reach
+    (root / "ch3/plan.yaml").write_text((root / "series/ch3/plan.yaml").read_text())
+    args = [command, str(notes), "--series", "ch4", "--continues", value]
+    assert main(args) == 1
+    assert (
+        f"--continues must name another series that has a plan.yaml, got {value!r}"
+        in (capsys.readouterr().err)
+    )
+    assert len(llm) == 1 and not (root / "series/ch4").exists()
+
+
+def test_a_series_cannot_continue_itself(project, capsys):
+    root, notes, llm, _ = project
+    main(["plan", str(notes), "--series", "ch4"])
+    args = ["plan", str(notes), "--series", "ch4", "--continues", "ch4", "--force"]
+    assert main(args) == 1
+    assert "--continues must name another" in capsys.readouterr().err
+    assert len(llm) == 1 and continues_of(root, "ch4") is None
+
+
+def test_run_continues_opens_the_series_with_the_others_last_episode(project):
+    root, notes, llm, _ = project
+    assert main(["run", str(notes), "--series", "ch3", "--auto", "--yes"]) == 0
+    del llm[:]
+    args = ["run", str(notes), "--series", "ch4", "--continues", "ch3"]
+    assert main(args) == 0  # stops after the plan
+    assert continues_of(root, "ch4") == "ch3"
+    assert main([*args, "--yes"]) == 0  # the same command again writes and renders
+    _, draft1, _, draft2, _ = llm
+    assert "(From the previous series, Algebra.) We met cosets." in draft1
+    assert "previous series" not in draft2
+
+
+def test_run_refuses_a_plan_that_does_not_continue_what_the_flag_says(project, capsys):
+    root, notes, llm, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    main(["plan", str(notes), "--series", "ch4"])
+    args = ["run", str(notes), "--series", "ch4", "--continues", "ch3", "--auto", "--yes"]  # fmt: skip
+    assert main(args) == 1
+    assert "plan.yaml doesn't say `continues: ch3`" in capsys.readouterr().err
+    assert len(llm) == 2 and not (root / "series/ch4/episodes").exists()
