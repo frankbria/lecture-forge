@@ -1470,11 +1470,17 @@ def test_a_render_reports_the_decodes_the_preview_did_not_do(series, tmp_path, b
 
 def test_render_says_it_is_checking_cached_pieces_before_the_cost(project, capsys):
     root, _ = project
-    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    script = episode_dir(root / "series" / "algebra", 2) / "script.txt"
+    script.write_text(
+        "\n\n".join([PARA] * 27), encoding="utf-8"
+    )  # more than two pieces
+    assert main(["render", "algebra", "--episode", "2", "--yes"]) == 0
     assert "hecking" not in capsys.readouterr().out  # nothing was cached yet
-    next((root / "Lectures").rglob("01 - *.mp3")).unlink()
-    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    next((root / "Lectures").rglob("02 - *.mp3")).unlink()
+    assert main(["render", "algebra", "--episode", "2", "--yes"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "Checking episode 1's cached pieces..."
-    assert lines[1].startswith("Episode 1: ") and "0 characters" in lines[1]
+    assert (
+        lines[0] == "Checking episode 2's cached pieces..."
+    )  # the episode, not a piece
+    assert lines[1].startswith("Episode 2: ") and "0 characters" in lines[1]
     assert lines.count(lines[0]) == 1  # once for the episode, not once for each piece
