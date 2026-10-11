@@ -282,8 +282,7 @@ def _measurements(marker) -> dict[str, tuple[int, int]]:
 def _with_measurements(state: dict, measured: dict[str, tuple[int, int]]) -> dict:
     """`state` holding these measurements, in "measured" only: left in an older file's
     place as well, a sample would be counted twice."""
-    old = (*MEASURED, "unfinished", "measured")
-    kept = {k: v for k, v in state.items() if k not in old}
+    kept = {k: v for k, v in state.items() if k not in (*MEASURED, "unfinished")}
     if measured:
         kept["measured"] = {
             m: dict(zip(MEASURED, pair)) for m, pair in measured.items()

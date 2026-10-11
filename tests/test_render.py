@@ -609,8 +609,9 @@ def test_a_rebuild_keeps_the_measurement_of_the_same_model(series, tmp_path, bee
     run(series, tmp_path, FakeTTS(beep))  # from cache, nothing measured
     assert measured(series)["credits_used"] == 440
     run(series, tmp_path, FakeTTS(beep), model="eleven_multilingual_v2")
-    assert measured(series)["credits_used"] == 440  # kept for its own model,
-    assert measured(series, model="eleven_multilingual_v2") is None  # not the other's
+    # Kept for its own model, and not counted for the other.
+    assert measured(series)["credits_used"] == 440
+    assert measured(series, model="eleven_multilingual_v2") is None
 
 
 def test_an_edit_adds_its_measurement_to_the_episodes_earlier_one(
@@ -915,9 +916,8 @@ def test_a_render_stopped_mid_episode_keeps_what_it_measured(
         paid = fails(series, tmp_path, Interrupted(beep), 10000, 9900, KeyboardInterrupt)  # fmt: skip
     assert r.credit_rate(series, "eleven_v3") == pytest.approx(100 / paid)
     result = run(series, tmp_path, FakeTTS(beep), balance=readings(9900, 9000)[1])
-    assert (
-        result.credits == 900
-    )  # the run that finishes adds its cost to the failed one's
+    # The run that finishes adds its cost to the failed run's.
+    assert result.credits == 900
     assert measured(series) == {
         "chars_sent": paid + result.billed,
         "credits_used": 1000,
@@ -1008,13 +1008,10 @@ def test_trying_another_model_keeps_each_models_measurement(series, tmp_path, be
     assert marker(series)["measured"] == each and marker(series)["model"] == other
     assert r.credit_rate(series, "eleven_v3") == pytest.approx(440 / first.billed)
     assert r.credit_rate(series, other) == pytest.approx(1000 / second.billed)
-    again = run(
-        series, tmp_path, FakeTTS(beep)
-    )  # eleven_v3 again, from its cached pieces
+    # Back to eleven_v3, from its cached pieces: nothing sent, nothing added or lost.
+    again = run(series, tmp_path, FakeTTS(beep))
     assert again.billed == 0 and marker(series)["model"] == "eleven_v3"
-    assert (
-        marker(series)["measured"] == each
-    )  # nothing sent: nothing added, nothing lost
+    assert marker(series)["measured"] == each
 
 
 OLD = {  # a render.json from before "measured": the top level, and "unfinished"
@@ -1042,6 +1039,42 @@ def test_an_older_render_json_is_read_as_it_is_and_rewritten_once(
     assert r.credit_rate(series, other) == pytest.approx(1.0)
 
 
+def test_an_older_files_two_places_add_up_for_one_model(series, tmp_path, beep):
+    """A finished render and a later failed one, both in eleven_v3, as main wrote them."""
+    old = {
+        "model": "eleven_v3", "chars_sent": 1000, "credits_used": 440,
+        "unfinished": {"model": "eleven_v3", "chars_sent": 500, "credits_used": 260},
+    }  # fmt: skip
+    path = episode_dir(series, 1) / "render.json"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(700 / 1500)
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(9000, 8900)[1])
+    assert marker(series)["measured"] == {
+        "eleven_v3": {"chars_sent": 1500 + result.billed, "credits_used": 800}
+    }
+
+
+@pytest.mark.parametrize(
+    "previous",
+    [
+        {"chars_sent": 1000, "credits_used": 440},  # no model: nobody's measurement
+        {"unfinished": {"model": 3, "chars_sent": 9, "credits_used": 9}},
+        {"model": "eleven_v3", "measured": []},
+        {"model": "eleven_v3", "measured": {"eleven_v3": 5, "eleven_v4": None}},
+    ],
+)
+def test_a_render_over_numbers_it_cannot_use_records_only_its_own(
+    series, tmp_path, beep, previous
+):
+    path = episode_dir(series, 1) / "render.json"
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    assert r.credit_rate(series, "eleven_v3") is None
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(9000, 8560)[1])
+    assert marker(series)["measured"] == {
+        "eleven_v3": {"chars_sent": result.billed, "credits_used": 440}
+    }
+
+
 def test_a_failed_render_moves_an_older_files_numbers_too(series, tmp_path, beep):
     _three_pieces(series)
     path = episode_dir(series, 1) / "render.json"
@@ -1067,6 +1100,7 @@ def test_a_failed_render_moves_an_older_files_numbers_too(series, tmp_path, beep
         {"eleven_v3": {"chars_sent": 9}},
         {"eleven_v3": {"chars_sent": True, "credits_used": 1}},
         {"eleven_v3": {"chars_sent": 9, "credits_used": -9}},
+        {"eleven_v3": {"chars_sent": 0, "credits_used": 5}},
     ],
 )
 def test_credit_rate_ignores_a_broken_measured_entry(tmp_path, broken):
