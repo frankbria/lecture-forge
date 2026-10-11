@@ -334,12 +334,18 @@ def load_plan(path: Path, *, root: str | Path = ".") -> dict:
 
 
 def reusable_plan(
-    path: Path, source: str | Path, *, root: str | Path = "."
+    path: Path,
+    source: str | Path,
+    *,
+    root: str | Path = ".",
+    part: tuple[int, int] | None = None,
 ) -> dict | None:
     """The plan at `path` if it was made for `source`, None if there is no plan yet.
 
     Raises PlanError for a plan made for another source, so a series is never written from
-    the wrong book, and for a plan that can't be loaded (a broken one is not "no plan")."""
+    the wrong book, and for a plan that can't be loaded (a broken one is not "no plan").
+    With `part`, the (start, end) of the source now asked for, also for a plan with no
+    episode in it: that is another chapter's plan. Episodes edited past the part are fine."""
     if not Path(path).exists():
         return None
     plan = load_plan(path, root=root)
@@ -347,5 +353,12 @@ def reusable_plan(
     if planned != (Path(root) / source).resolve():
         raise PlanError(
             f"{path} is a plan for {planned}; use another --series for {source}"
+        )
+    if part and not any(
+        e["start"] <= part[1] and part[0] <= e["end"] for e in plan["episodes"]
+    ):
+        raise PlanError(
+            f"{path} has no episode in {plan['unit']} {part[0]}-{part[1]}; use another "
+            "--series for that part of the source"
         )
     return plan

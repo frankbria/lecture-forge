@@ -598,6 +598,20 @@ def test_reusable_plan_is_the_existing_plan_only_for_the_same_source(tmp_path, b
         reusable_plan(out, book.path, root=tmp_path)
 
 
+def test_reusable_plan_must_hold_an_episode_in_the_part_asked_for(tmp_path, book):
+    from lecture_forge.plan import reusable_plan
+
+    out = tmp_path / "series" / "s" / "plan.yaml"
+    assert reusable_plan(out, book.path, root=tmp_path, part=(5, 6)) is None
+    reply = plan_json(episode(2, 3), episode(4, 4))
+    write_plan(make_plan(book, GUIDE, 2, 4, lambda s, u, p: reply), book, out)
+    for part in [(2, 4), (1, 2), (4, 6), (3, 3), (1, 6)]:  # the edges count
+        assert reusable_plan(out, book.path, root=tmp_path, part=part) is not None
+    for part in [(1, 1), (5, 6)]:
+        with pytest.raises(PlanError, match=f"no episode in pages {part[0]}-{part[1]}"):
+            reusable_plan(out, book.path, root=tmp_path, part=part)
+
+
 def test_reusable_plan_resolves_a_relative_source_under_the_root(
     tmp_path, monkeypatch, book
 ):

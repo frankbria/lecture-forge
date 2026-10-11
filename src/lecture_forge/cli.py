@@ -110,6 +110,15 @@ def _chapter(n: int, src: Source) -> tuple[str, int, int]:
     return found[n - 1]
 
 
+def _part(args: argparse.Namespace, src: Source) -> tuple[int, int]:
+    """The (start, end) --range or --chapter asks for: the whole source without them."""
+    if args.chapter is None:
+        return _range(args.range, src)
+    title, start, end = _chapter(args.chapter, src)
+    print(f"Chapter {args.chapter}: {title}, pages {start}-{end}")
+    return start, end
+
+
 def _check_series(slug: str) -> Path:
     return series_dir(ROOT, slug)
 
@@ -154,11 +163,7 @@ def cmd_plan(args: argparse.Namespace) -> None:
     settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
-    if args.chapter is None:
-        start, end = _range(args.range, src)
-    else:
-        title, start, end = _chapter(args.chapter, src)
-        print(f"Chapter {args.chapter}: {title}, pages {start}-{end}")
+    start, end = _part(args, src)
     call = _provider_call(settings, args.auto)
 
     unit = "pages" if src.kind == "pdf" else "lines"
@@ -286,7 +291,12 @@ def cmd_run(args: argparse.Namespace) -> None:
     settings.require("elevenlabs_api_key")  # fail now, not after an hour of writing
     settings.require("voice_id")
     continues = _continues(args)
-    if (plan := reusable_plan(plan_path, args.source, root=ROOT)) is not None:
+    part = None
+    if plan_path.exists() and (args.range, args.chapter) != (None, None):
+        # or a mistyped --chapter would write and render the chapter planned before
+        part = _part(args, open_source(args.source))
+    plan = reusable_plan(plan_path, args.source, root=ROOT, part=part)
+    if plan is not None:
         if continues and plan["continues"] != continues:
             # or the series would be written and rendered without the recap asked for
             raise ValueError(
