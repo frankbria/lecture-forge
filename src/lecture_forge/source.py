@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Literal
 
@@ -94,6 +95,21 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
                 else (n, s)
             )
     return entries
+
+
+def chapters(src: Source) -> list[tuple[str, int, int]]:
+    """(title, first page, last page) of each top-level PDF bookmark, in order: chapter
+    N is the Nth of them, whatever number the book prints. Text sources have none."""
+    if src.kind != "pdf":
+        return []
+    starts: list[tuple[str, int]] = []
+    for level, title, page in outline(src):
+        # A bookmark that isn't after the chapter before it would start an empty or
+        # backwards chapter: it is dropped.
+        if level == 1 and (not starts or page > starts[-1][1]):
+            starts.append((title, page))
+    starts.append(("", src.length + 1))  # the last chapter ends on the last page
+    return [(title, page, after - 1) for (title, page), (_, after) in pairwise(starts)]
 
 
 def _check_range(src: Source, start: int, end: int) -> None:

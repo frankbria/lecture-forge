@@ -15,6 +15,7 @@ uv tool install --editable .              # once: puts `lecture-forge` and its s
 lecture-forge outline book.pdf                  # length + bookmarks/headings of a PDF/md/txt source
 lecture-forge plan book.pdf --series topology   # proposes series/topology/plan.yaml; review and edit it
 lecture-forge plan book.pdf --series ch3 --range 120-185   # plan one chapter of a full book
+lecture-forge run book.pdf --series ch3 --chapter 3   # range from the PDF's bookmarks (see outline)
 lecture-forge write topology --all              # script pass + critique per episode, in order
 lecture-forge write topology --episode 3 --force   # rewrite one episode
 lecture-forge render topology --all             # MP3s to D:\Dropbox\Lectures\<series title> (asks first)

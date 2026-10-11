@@ -5,7 +5,7 @@ import shutil
 import pymupdf
 import pytest
 import yaml
-from test_source import scanned_pdf
+from test_source import BOOK_TOC, scanned_pdf, toc_pdf
 
 from lecture_forge import providers
 from lecture_forge.cli import main
@@ -326,6 +326,61 @@ def test_plan_command_rejects_bad_range(project, book, rng, capsys):
         main(["plan", str(book.path), "--series", "s", "--range", rng, "--auto"]) == 1
     )
     assert "range" in capsys.readouterr().err.lower()
+
+
+def test_plan_command_chapter_plans_that_bookmarks_pages(
+    project, tmp_path, monkeypatch, capsys
+):
+    seen = {}
+
+    def planner(system, user, pdf, settings):
+        seen["pages"], seen["user"] = pymupdf.open(pdf).page_count, user
+        return plan_json(episode(5, 8))
+
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", planner)
+    book = toc_pdf(tmp_path / "book.pdf", 10, BOOK_TOC)
+    assert main(["plan", str(book), "--series", "s", "--chapter", "2", "--auto"]) == 0
+    out = capsys.readouterr().out
+    assert "Chapter 2: Ch 2, pages 5-8\nPlanning book.pdf pages 5-8 with" in out
+    assert seen["pages"] == 4
+    assert "first page of the attached PDF is source page 5" in seen["user"]
+    plan = load_plan(project / "series/s/plan.yaml")
+    assert [(e["start"], e["end"]) for e in plan["episodes"]] == [(5, 8)]
+
+
+@pytest.mark.parametrize("n", ["0", "4", "9", "-1"])
+def test_plan_command_rejects_a_chapter_the_book_does_not_have(
+    project, tmp_path, monkeypatch, n, capsys
+):
+    calls = []
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", lambda *a: calls.append(a))
+    book = toc_pdf(tmp_path / "book.pdf", 10, BOOK_TOC)
+    assert main(["plan", str(book), "--series", "s", f"--chapter={n}", "--auto"]) == 1
+    err = capsys.readouterr().err
+    assert f"--chapter {n}" in err and "book.pdf has chapters 1-3" in err
+    assert calls == [] and not (project / "series/s/plan.yaml").exists()
+
+
+def test_plan_command_chapter_needs_a_pdf_with_bookmarks(
+    project, book, notes, monkeypatch, capsys
+):
+    calls = []
+    monkeypatch.setitem(providers.PROVIDERS, "anthropic", lambda *a: calls.append(a))
+    for src in (book, notes):  # a PDF without bookmarks, and Markdown with headings
+        args = ["plan", str(src.path), "--series", "s", "--chapter", "1", "--auto"]
+        assert main(args) == 1
+        err = capsys.readouterr().err
+        assert f"{src.path.name} has no chapter bookmarks; use --range" in err
+    assert calls == []
+
+
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_chapter_and_range_cannot_be_given_together(project, book, command, capsys):
+    args = [command, str(book.path), "--series", "s", "--chapter", "1", "--range", "1-2"]  # fmt: skip
+    with pytest.raises(SystemExit) as e:
+        main(args)
+    assert e.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
 
 
 def test_plan_command_reports_provider_failure(project, book, monkeypatch, capsys):

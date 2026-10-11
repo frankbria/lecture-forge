@@ -17,7 +17,13 @@ from lecture_forge.plan import (
     write_plan,
 )
 from lecture_forge.providers import ProviderError, complete_switching
-from lecture_forge.source import Source, open_source, outline, scanned_note
+from lecture_forge.source import (
+    Source,
+    chapters,
+    open_source,
+    outline,
+    scanned_note,
+)
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
 from lecture_forge.write import (
     WriteError,
@@ -65,8 +71,14 @@ def cmd_outline(args: argparse.Namespace) -> None:
     entries = outline(src)
     if not entries:
         print("(no bookmarks or headings found)")
+    numbered = chapters(src)  # in outline order: the numbers --chapter takes
+    n = 0
     for level, title, loc in entries:
-        print(f"{'  ' * (level - 1)}{title}  [{loc}]")
+        number = ""
+        if level == 1 and n < len(numbered) and numbered[n][:2] == (title, loc):
+            n += 1
+            number = f"{n}. "
+        print(f"{'  ' * (level - 1)}{number}{title}  [{loc}]")
 
 
 def _range(text: str | None, src: Source) -> tuple[int, int]:
@@ -78,6 +90,22 @@ def _range(text: str | None, src: Source) -> tuple[int, int]:
     if not 1 <= start <= end <= src.length:
         raise ValueError(f"Bad range {start}-{end}: {src.path.name} has 1-{src.length}")
     return start, end
+
+
+def _chapter(n: int, src: Source) -> tuple[str, int, int]:
+    """--chapter N: (title, first page, last page) of the Nth top-level bookmark."""
+    found = chapters(src)
+    if not found:
+        raise ValueError(
+            f"{src.path.name} has no chapter bookmarks; use --range "
+            "(see lecture-forge outline)"
+        )
+    if not 1 <= n <= len(found):
+        raise ValueError(
+            f"--chapter {n}: {src.path.name} has chapters 1-{len(found)} "
+            "(see lecture-forge outline)"
+        )
+    return found[n - 1]
 
 
 def _check_series(slug: str) -> Path:
@@ -124,7 +152,11 @@ def cmd_plan(args: argparse.Namespace) -> None:
     settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
-    start, end = _range(args.range, src)
+    if args.chapter is None:
+        start, end = _range(args.range, src)
+    else:
+        title, start, end = _chapter(args.chapter, src)
+        print(f"Chapter {args.chapter}: {title}, pages {start}-{end}")
     call = _provider_call(settings, args.auto)
 
     unit = "pages" if src.kind == "pdf" else "lines"
@@ -263,7 +295,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     else:
         cmd_plan(argparse.Namespace(
             source=args.source, series=args.series, range=args.range, force=False,
-            auto=args.auto, continues=args.continues,
+            auto=args.auto, continues=args.continues, chapter=args.chapter,
         ))  # fmt: skip
         if not args.auto:  # the approval gate: review the plan, then run again
             print("Run the same command again to write and render, or pass --auto.")
@@ -287,7 +319,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--series", required=True, help="name for this series, e.g. topology"
     )
-    p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part = p.add_mutually_exclusive_group()
+    part.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part.add_argument(
+        "--chapter",
+        type=int,
+        metavar="N",
+        help="only plan the Nth top-level bookmark of a PDF (outline numbers them)",
+    )
     p.add_argument(
         "--continues",
         metavar="SERIES",
@@ -335,7 +374,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--series", required=True, help="name for this series, e.g. topology"
     )
-    p.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part = p.add_mutually_exclusive_group()
+    part.add_argument("--range", help="only plan these pages/lines, e.g. 120-185")
+    part.add_argument(
+        "--chapter",
+        type=int,
+        metavar="N",
+        help="only plan the Nth top-level bookmark of a PDF (outline numbers them)",
+    )
     p.add_argument(
         "--continues",
         metavar="SERIES",

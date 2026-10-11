@@ -2,6 +2,7 @@ import pymupdf
 import pytest
 
 from lecture_forge.source import (
+    chapters,
     extract_text,
     open_source,
     outline,
@@ -32,6 +33,19 @@ def scanned_pdf(path, pages):
             page.insert_text((72, 820), "12  Scanned by HP 12 Oct 2026 14:32")
     doc.save(path)
     return path
+
+
+def toc_pdf(path, pages, toc):
+    """Blank pages with the given bookmarks: [level, title, page] each."""
+    doc = pymupdf.open()
+    for _ in range(pages):
+        doc.new_page()
+    doc.set_toc(toc)
+    doc.save(path)
+    return path
+
+
+BOOK_TOC = [[1, "Ch 1", 1], [2, "1.1", 2], [1, "Ch 2", 5], [1, "Index", 9]]
 
 
 @pytest.fixture
@@ -244,3 +258,29 @@ def test_scanned_pages_are_page_images_with_at_most_a_stamped_number(tmp_path):
 
 def test_text_sources_have_no_scanned_pages(notes):
     assert scanned_pages(open_source(notes)) == []
+
+
+# --- chapters: what --chapter N counts ------------------------------------------------
+
+
+def test_chapters_are_the_top_level_bookmarks_each_up_to_the_next(tmp_path):
+    src = open_source(toc_pdf(tmp_path / "b.pdf", 10, BOOK_TOC))
+    assert chapters(src) == [("Ch 1", 1, 4), ("Ch 2", 5, 8), ("Index", 9, 10)]
+
+
+def test_one_chapter_runs_to_the_last_page(tmp_path):
+    src = open_source(toc_pdf(tmp_path / "b.pdf", 6, [[1, "Only", 3], [2, "Sec", 4]]))
+    assert chapters(src) == [("Only", 3, 6)]
+
+
+def test_a_bookmark_not_after_the_chapter_before_it_starts_no_chapter(tmp_path):
+    toc = [[1, "Cover", 1], [1, "Title", 1], [1, "Ch 1", 3], [1, "Back", 2], [1, "Ch 2", 6]]  # fmt: skip
+    src = open_source(toc_pdf(tmp_path / "b.pdf", 8, toc))
+    assert chapters(src) == [("Cover", 1, 2), ("Ch 1", 3, 5), ("Ch 2", 6, 8)]
+
+
+def test_sources_without_top_level_bookmarks_have_no_chapters(tmp_path, notes):
+    assert chapters(open_source(notes)) == []  # headings aren't chapters: use --range
+    assert chapters(open_source(toc_pdf(tmp_path / "plain.pdf", 3, []))) == []
+    dangling = toc_pdf(tmp_path / "d.pdf", 3, [[1, "Nowhere", -1], [2, "Sec", 2]])
+    assert chapters(open_source(dangling)) == []
