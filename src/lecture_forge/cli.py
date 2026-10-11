@@ -71,11 +71,13 @@ def cmd_outline(args: argparse.Namespace) -> None:
     entries = outline(src)
     if not entries:
         print("(no bookmarks or headings found)")
-    numbered = chapters(src)  # in outline order: the numbers --chapter takes
+    # The numbers --chapter takes. A top-level bookmark that starts no chapter is on an
+    # earlier page than the next chapter, so the page tells the two apart.
+    starts = [start for _, start, _ in chapters(src)]
     n = 0
     for level, title, loc in entries:
         number = ""
-        if level == 1 and n < len(numbered) and numbered[n][:2] == (title, loc):
+        if level == 1 and starts[n : n + 1] == [loc]:
             n += 1
             number = f"{n}. "
         print(f"{'  ' * (level - 1)}{number}{title}  [{loc}]")

@@ -56,8 +56,10 @@ def outline(src: Source) -> list[tuple[int, str, int]]:
     """(level, title, location) for each PDF bookmark or Markdown heading."""
     if src.kind == "pdf":
         with pymupdf.open(src.path) as doc:
-            return [
-                (lvl, title, page) for lvl, title, page in doc.get_toc() if page >= 1
+            return [  # a title can hold line breaks: keep each entry on one line
+                (lvl, " ".join(title.split()), page)
+                for lvl, title, page in doc.get_toc()
+                if page >= 1
             ]
     lines = _read(src.path).splitlines()
     start = 0

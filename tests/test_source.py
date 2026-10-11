@@ -115,6 +115,12 @@ def test_dangling_bookmarks_are_dropped(tmp_path):
     assert outline(open_source(p)) == [(1, "Real", 1)]
 
 
+def test_a_bookmark_title_with_line_breaks_is_one_line(tmp_path):
+    src = open_source(toc_pdf(tmp_path / "b.pdf", 4, [[1, "Ch 1\r\n  Vectors ", 2]]))
+    assert outline(src) == [(1, "Ch 1 Vectors", 2)]
+    assert chapters(src) == [("Ch 1 Vectors", 2, 4)]
+
+
 def test_unsupported_extension_is_rejected(tmp_path):
     p = tmp_path / "book.epub"
     p.write_text("x")
