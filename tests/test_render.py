@@ -1,6 +1,8 @@
+import io
 import json
 import os
 import subprocess
+import wave
 
 import pytest
 import yaml
@@ -1014,15 +1016,20 @@ def _pieces(series, tmp_path):
 
 
 def _damaged(beep, how):
+    wav = io.BytesIO()
+    with wave.open(wav, "wb") as w:  # real audio, which the MP3 join can't take
+        w.setparams((1, 2, 44100, 0, "NONE", "NONE"))
+        w.writeframes(bytes(44100))
     return {
         "an error page": b"<html><body><h1>502 Bad Gateway</h1></body></html>",
         "empty": b"",
         "garbage inside": beep[:3000] + bytes(range(256)) * 8 + beep[3000:],
         "cut in half": beep[: len(beep) // 2],
+        "a WAV": wav.getvalue(),
     }[how]
 
 
-DAMAGE = ["an error page", "empty", "garbage inside", "cut in half"]
+DAMAGE = ["an error page", "empty", "garbage inside", "cut in half", "a WAV"]
 
 
 @pytest.mark.parametrize("how", DAMAGE)

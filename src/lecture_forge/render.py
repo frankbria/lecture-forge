@@ -316,6 +316,8 @@ def _playable(mp3: Path) -> bool:
         return False
     if shutil.which("ffmpeg") is None:  # can't tell, and nothing renders without ffmpeg
         return True
+    # -nostdin: or ffmpeg takes the keys typed ahead of a front end's question.
+    # -f mp3: other audio decodes too, and the join copies MP3 frames only.
     proc = subprocess.run(
         ["ffmpeg", "-nostdin", "-v", "warning", "-xerror", "-f", "mp3",
          "-i", str(mp3.resolve()), "-f", "null", "-"], capture_output=True, check=False,
