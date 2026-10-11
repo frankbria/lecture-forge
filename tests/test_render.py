@@ -927,6 +927,7 @@ def test_a_join_that_fails_after_paying_keeps_the_measurement(series, tmp_path, 
     sent = sum(len(t) for t, _ in tts.calls)
     assert r.credit_rate(series, "eleven_v3") == pytest.approx(440 / sent)
     assert not list((tmp_path / "Lectures").rglob("*.mp3"))  # still nothing published
+    assert set(marker(series)) == {"unfinished"}  # and nothing marked as rendered
     calls, balance = readings()
     with pytest.raises(RenderError, match="ffmpeg failed"):  # a join-only retry
         run(series, tmp_path, FakeTTS(beep), balance=balance)

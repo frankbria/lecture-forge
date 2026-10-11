@@ -309,9 +309,10 @@ def require_ffmpeg() -> None:
 def _playable(mp3: Path) -> bool:
     """Whether the file is there and ffmpeg decodes all of it as MP3 audio.
 
-    An error page saved as audio, or a file damaged on disk, fails to decode. A file cut
-    to under about 15/16 of the size its own header records still decodes: ffmpeg exits 0
-    and warns that the size is off. A smaller cut is a valid MP3 and passes."""
+    An error page saved as audio, or a file damaged on disk, fails to decode: ffmpeg logs
+    an error, and before version 7 still exits 0. A file cut to under about 15/16 of the
+    size its own header records decodes without one: ffmpeg only warns that the size is
+    off. A smaller cut is a valid MP3 and passes."""
     if not mp3.exists():
         return False
     if shutil.which("ffmpeg") is None:  # can't tell, and nothing renders without ffmpeg
@@ -319,10 +320,11 @@ def _playable(mp3: Path) -> bool:
     # -nostdin: or ffmpeg takes the keys typed ahead of a front end's question.
     # -f mp3: other audio decodes too, and the join copies MP3 frames only.
     proc = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "warning", "-xerror", "-f", "mp3",
+        ["ffmpeg", "-nostdin", "-loglevel", "level+warning", "-f", "mp3",
          "-i", str(mp3.resolve()), "-f", "null", "-"], capture_output=True, check=False,
     )  # fmt: skip
-    return proc.returncode == 0 and b"do not match" not in proc.stderr
+    bad = (b"[error]", b"do not match")  # "filesize and duration do not match"
+    return proc.returncode == 0 and not any(sign in proc.stderr for sign in bad)
 
 
 @dataclass(frozen=True)
