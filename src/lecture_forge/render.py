@@ -250,23 +250,27 @@ def _target(
     return script, out, state, previous, up_to_date
 
 
-def _measured(marker) -> tuple[int, int]:
-    """(characters sent, credits used) recorded in a render.json, or (0, 0)."""
-    vals = [marker.get(k) for k in MEASURED] if isinstance(marker, dict) else []
-    ok = len(vals) == 2 and all(type(v) is int and v > 0 for v in vals)
+def _measured(marker, model: str) -> tuple[int, int]:
+    """(characters sent, credits used) of `model` recorded in a render.json, or in its
+    "unfinished" part; (0, 0) if none."""
+    if not isinstance(marker, dict) or marker.get("model") != model:
+        return 0, 0
+    vals = [marker.get(k) for k in MEASURED]
+    ok = all(type(v) is int and v > 0 for v in vals)
     return (vals[0], vals[1]) if ok else (0, 0)
 
 
 def credit_rate(series_dir: Path, model: str) -> float | None:
-    """Credits per character sent, measured over this series' earlier renders of `model`."""
+    """Credits per character sent, measured over this series' earlier renders of `model`,
+    those that failed after paying included."""
     chars = credits = 0
     for marker in Path(series_dir).glob("episodes/*/render.json"):
         try:
             m = json.loads(marker.read_text(encoding="utf-8"))
         except ValueError:  # torn: _target warns when that episode renders
             continue
-        if isinstance(m, dict) and m.get("model") == model:
-            c, k = _measured(m)
+        for part in (m, m.get("unfinished")) if isinstance(m, dict) else ():
+            c, k = _measured(part, model)
             chars, credits = chars + c, credits + k
     return credits / chars if chars > 0 else None
 
@@ -395,7 +399,7 @@ def render_episode(
     on_progress: OnProgress = ignore,
 ) -> Rendered:
     """`balance` reads the plan's credit balance; read before and after synthesis, the drop
-    is recorded in render.json as what this episode cost."""
+    is recorded in render.json as what this episode cost, also when the render then fails."""
     script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings)
     if up_to_date and not force:
         return Rendered(out, 0, 0, True)
@@ -410,38 +414,44 @@ def render_episode(
     stitch = settings.model_id not in NO_STITCHING
     files, ids, billed, reused, before = [], [], 0, 0, None
     pieces = _keyed(settings, split_text(script, char_limit(settings.model_id)))
-    for k, (text, key) in enumerate(pieces, 1):
-        mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
-        cached = mp3.exists()  # checked once: the event and the work agree
-        note = "reused" if cached else "synthesizing"
-        on_progress(Progress("piece", k, len(pieces), note, episode=ep["n"]))
-        if cached:
-            reused += 1
-        else:
-            if balance and not billed:  # just before the first piece paid for
-                before = balance()
-            context = [i for i in ids[-MAX_PREVIOUS:] if i] if stitch else []
-            audio, request_id = tts(text, context)
-            part = mp3.with_suffix(".part")
-            part.write_bytes(audio)
-            save(rid, request_id)
-            os.replace(part, mp3)  # a piece is cached only once it is fully on disk
-            billed += len(text)
-        fresh = rid.exists() and time.time() - rid.stat().st_mtime < ID_TTL_S
-        ids.append(rid.read_text(encoding="utf-8").strip() if fresh else "")  # "": skip
-        files.append(mp3)
-    after = balance() if balance and billed else None
-    # Counts can lag, or be topped up mid-render: only a drop is a cost.
-    credits = before - after if before is not None and after is not None else 0
+    try:
+        for k, (text, key) in enumerate(pieces, 1):
+            mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
+            cached = mp3.exists()  # checked once: the event and the work agree
+            note = "reused" if cached else "synthesizing"
+            on_progress(Progress("piece", k, len(pieces), note, episode=ep["n"]))
+            if cached:
+                reused += 1
+            else:
+                if balance and not billed:  # just before the first piece paid for
+                    before = balance()
+                context = [i for i in ids[-MAX_PREVIOUS:] if i] if stitch else []
+                audio, request_id = tts(text, context)
+                part = mp3.with_suffix(".part")
+                part.write_bytes(audio)
+                save(rid, request_id)
+                os.replace(part, mp3)  # a piece is cached only once it is fully on disk
+                billed += len(text)
+            fresh = rid.exists() and time.time() - rid.stat().st_mtime < ID_TTL_S
+            # "": skipped when the next pieces are stitched
+            ids.append(rid.read_text(encoding="utf-8").strip() if fresh else "")
+            files.append(mp3)
+    finally:  # also after a failed piece or Ctrl-C: the pieces before it were paid for
+        after = balance() if balance and billed else None
+        # Counts can lag, or be topped up mid-render: only a drop is a cost.
+        credits = before - after if before is not None and after is not None else 0
+        sent, used = _measured(previous.get("unfinished"), state["model"])
+        if credits > 0:
+            sent, used = sent + billed, used + credits
+            # Saved before the join, beside what the up-to-date check reads: a render
+            # that fails from here on has still measured the rate.
+            unfinished = {"model": state["model"]} | dict(zip(MEASURED, (sent, used)))
+            save(marker, json.dumps(previous | {"unfinished": unfinished}, indent=2))
     # Add to the episode's earlier measurement of this model: a small edit's sample
     # mustn't replace a whole episode's, and a rebuild that sends nothing keeps it.
-    sent, used = (
-        _measured(previous) if previous.get("model") == state["model"] else (0, 0)
-    )
-    if credits > 0:
-        sent, used = sent + billed, used + credits
-    if used:
-        state |= dict(zip(MEASURED, (sent, used)))
+    done = _measured(previous, state["model"])
+    if done[1] + used:
+        state |= dict(zip(MEASURED, (done[0] + sent, done[1] + used)))
     artist = plan["author"] or "lecture-forge"
     on_progress(Progress("join", episode=ep["n"]))
     _join(files, out, {
