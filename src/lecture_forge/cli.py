@@ -52,6 +52,21 @@ ADVICE = {
 }
 
 
+# The note on later episodes a write leaves on an old recap, by their state
+# (write.on_old_recap): what follows "episode 2", and what follows "episodes 2 and 3".
+BUILT = "built on the old summary and puzzle"
+OLD_RECAP = {
+    "current": (
+        f"is {BUILT}; rewrite it with --force if the recap matters",
+        f"are {BUILT}; rewrite them with --force if the recap matters",
+    ),
+    "stale": (
+        f"is {BUILT} and no longer matches the plan; write it again (no --force needed)",
+        f"are {BUILT} and no longer match the plan; write them again in order (no --force needed)",
+    ),
+}
+
+
 def _worded(e: Exception) -> str:
     """An error's message, with the engine's advice said the CLI's way."""
     advice = ADVICE.get(getattr(e, "fix", None))
@@ -210,6 +225,13 @@ def cmd_plan(args: argparse.Namespace) -> None:
     print("Review and edit the plan before writing scripts.")
 
 
+def _episodes(ns: list[int]) -> str:
+    """In words: "episode 2", "episodes 2 and 3", "episodes 2, 3 and 5"."""
+    if len(ns) == 1:
+        return f"episode {ns[0]}"
+    return f"episodes {', '.join(map(str, ns[:-1]))} and {ns[-1]}"
+
+
 def cmd_write(args: argparse.Namespace) -> None:
     series_dir = _check_series(args.series)
     plan_path = series_dir / "plan.yaml"
@@ -244,11 +266,10 @@ def cmd_write(args: argparse.Namespace) -> None:
             print(
                 f"  note: the writer suggests a split: {w.split} (plan.yaml is unchanged)"
             )
-        if later := on_old_recap(plan, series_dir, todo, ep):
-            print(
-                f"  note: episode {', '.join(map(str, later))} was written from the old "
-                "summary and puzzle; rewrite it with --force if the recap matters"
-            )
+        later = on_old_recap(plan, series_dir, todo, ep)
+        for state, (one, several) in OLD_RECAP.items():
+            if ns := [n for n, s in later if s == state]:
+                print(f"  note: {_episodes(ns)} {one if len(ns) == 1 else several}")
     print("Review the script.txt files before rendering audio.")
 
 

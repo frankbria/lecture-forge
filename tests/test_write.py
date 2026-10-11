@@ -614,7 +614,7 @@ def test_write_one_episode_refuses_to_overwrite_without_force(project, capsys):
     assert "--force" in capsys.readouterr().err
     assert main(["write", "algebra", "--episode", "1", "--force", "--auto"]) == 0
     assert (
-        "note: episode 2 was written from the old summary and puzzle"
+        "note: episode 2 is built on the old summary and puzzle; rewrite it with --force"
         in capsys.readouterr().out
     )
 
@@ -877,7 +877,10 @@ def test_write_all_notes_a_later_episode_left_on_a_rewritten_ones_old_recap(
     make_plan_file(root, book, [(1, [1, 2]), (2, [4, 6])])
     assert main(["write", "algebra", "--all", "--auto"]) == 0
     out = capsys.readouterr().out
-    assert "note: episode 2 was written from the old summary and puzzle" in out
+    assert (
+        "note: episode 2 is built on the old summary and puzzle; rewrite it with --force"
+        in out
+    )
     assert "Episode 2: Episode 2: already written, skipping" in out
     assert len(calls) == 6  # only episode 1 is rewritten
 
@@ -891,7 +894,10 @@ def test_write_all_notes_later_episodes_after_writing_a_lost_script_again(
     (root / "series/algebra/episodes/01/script.txt").unlink()
     assert main(["write", "algebra", "--all", "--auto"]) == 0
     out = capsys.readouterr().out
-    assert "note: episode 2 was written from the old summary and puzzle" in out
+    assert (
+        "note: episode 2 is built on the old summary and puzzle; rewrite it with --force"
+        in out
+    )
     assert len(calls) == 6  # only episode 1 is written again
 
 
@@ -1044,7 +1050,9 @@ def _replanned(tmp_path, book, written, changed):
 
 def _left(plan, sdir, **kw):
     todo = episodes_to_write(plan, sdir, **kw)
-    left = {ep["n"]: on_old_recap(plan, sdir, todo, ep) for ep, _, _ in todo}
+    left = {
+        ep["n"]: [n for n, _ in on_old_recap(plan, sdir, todo, ep)] for ep, _, _ in todo
+    }
     return {n: later for n, later in left.items() if later}
 
 
@@ -1068,6 +1076,55 @@ def test_on_old_recap_lists_later_written_episodes_this_run_leaves(
     """All four episodes are written, then the plan changes the `changed` ranges."""
     plan, sdir = _replanned(tmp_path, book, (1, 2, 3, 4), changed)
     assert _left(plan, sdir, **kw) == expected
+
+
+def test_on_old_recap_says_which_later_episodes_are_stale(tmp_path, book):
+    """A front end words its advice by state: a stale episode is rewritten without force."""
+    plan, sdir = _replanned(tmp_path, book, (1, 2, 3, 4), {3: [4, 5]})
+    todo = episodes_to_write(plan, sdir, episode=1, force=True)
+    assert on_old_recap(plan, sdir, todo, plan["episodes"][0]) == [
+        (2, "current"), (3, "stale"), (4, "current")
+    ]  # fmt: skip
+
+
+OLD = "built on the old summary and puzzle"
+FORCE = "with --force if the recap matters"
+
+
+@pytest.mark.parametrize(
+    "changed, notes",
+    [
+        ({}, [f"episodes 2, 3 and 4 are {OLD}; rewrite them {FORCE}"]),
+        (
+            {3: [4, 5]},
+            [
+                f"episodes 2 and 4 are {OLD}; rewrite them {FORCE}",
+                f"episode 3 is {OLD} and no longer matches the plan; write it again (no --force needed)",
+            ],
+        ),
+        (
+            {2: [2, 4], 3: [4, 5]},
+            [
+                f"episode 4 is {OLD}; rewrite it {FORCE}",
+                f"episodes 2 and 3 are {OLD} and no longer match the plan; write them again in order (no --force needed)",
+            ],
+        ),
+    ],
+)
+def test_write_words_the_old_recap_note_by_number_and_state(
+    project, book, capsys, changed, notes
+):
+    """All four episodes are written, the plan changes the `changed` ranges, and episode 1
+    is rewritten alone: a stale later episode is not told to use --force."""
+    root, _ = project
+    make_plan_file(root, book, FOUR)
+    assert main(["write", "algebra", "--all", "--auto"]) == 0
+    make_plan_file(root, book, [(n, changed.get(n, rng)) for n, rng in FOUR])
+    capsys.readouterr()
+    assert main(["write", "algebra", "--episode", "1", "--force", "--auto"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    found = [line for line in out if line.startswith("  note: ")]
+    assert [line.removeprefix("  note: ") for line in found] == notes
 
 
 def test_on_old_recap_counts_a_lost_script_written_again_like_a_rewrite(tmp_path, book):
