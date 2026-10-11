@@ -256,7 +256,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         if continues and plan["continues"] != continues:
             # or the series would be written and rendered without the recap asked for
             raise ValueError(
-                f"{plan_path} doesn't say `continues: {continues}`; add that line to it, "
+                f"{plan_path} doesn't say `continues: {continues}`; edit it to say so, "
                 "or leave out --continues"
             )
         print(f"Using the existing {plan_path} (delete it to plan again)")
