@@ -427,11 +427,11 @@ def render_episode(
                     before = balance()
                 context = [i for i in ids[-MAX_PREVIOUS:] if i] if stitch else []
                 audio, request_id = tts(text, context)
+                billed += len(text)  # paid for, even if caching it fails below
                 part = mp3.with_suffix(".part")
                 part.write_bytes(audio)
                 save(rid, request_id)
                 os.replace(part, mp3)  # a piece is cached only once it is fully on disk
-                billed += len(text)
             fresh = rid.exists() and time.time() - rid.stat().st_mtime < ID_TTL_S
             # "": skipped when the next pieces are stitched
             ids.append(rid.read_text(encoding="utf-8").strip() if fresh else "")
@@ -446,7 +446,11 @@ def render_episode(
             # Saved before the join, beside what the up-to-date check reads: a render
             # that fails from here on has still measured the rate.
             unfinished = {"model": state["model"]} | dict(zip(MEASURED, (sent, used)))
-            save(marker, json.dumps(previous | {"unfinished": unfinished}, indent=2))
+            kept = json.dumps(previous | {"unfinished": unfinished}, indent=2)
+            try:
+                save(marker, kept)
+            except OSError as e:  # never in place of the error that stopped the render
+                log.warning("couldn't save the measured credits: %s", e)
     # Add to the episode's earlier measurement of this model: a small edit's sample
     # mustn't replace a whole episode's, and a rebuild that sends nothing keeps it.
     done = _measured(previous, state["model"])

@@ -971,3 +971,27 @@ def test_an_unfinished_measurement_is_never_credited_to_another_model(
     run(series, tmp_path, FakeTTS(beep))  # finished in eleven_v3, nothing measured
     m = marker(series)
     assert "credits_used" not in m and "unfinished" not in m
+
+
+def _first_piece(series, tmp_path):
+    script = (episode_dir(series, 1) / "script.txt").read_text(encoding="utf-8")
+    return r._keyed(settings(tmp_path), split_text(script, 5000))[0]
+
+
+def test_a_piece_paid_for_but_not_cached_is_still_measured(series, tmp_path, beep):
+    text, key = _first_piece(series, tmp_path)
+    blocked = episode_dir(series, 1) / "audio" / f"{key}.part"
+    blocked.mkdir(parents=True)  # the audio arrives, and can't be written
+    with pytest.raises(OSError):
+        run(series, tmp_path, FakeTTS(beep), balance=readings(10000, 9000)[1])
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(1000 / len(text))
+
+
+def test_a_measurement_that_cannot_be_saved_never_hides_the_real_error(
+    series, tmp_path, beep, caplog
+):
+    blocked = episode_dir(series, 1) / "render.json.tmp"
+    blocked.mkdir()  # render.json can't be written
+    with pytest.raises(RenderError, match="outage"):
+        run(series, tmp_path, FakeTTS(beep, fail_at=1), balance=readings(10000, 9900)[1])  # fmt: skip
+    assert "couldn't save the measured credits" in caplog.text
