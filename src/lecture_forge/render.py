@@ -246,7 +246,10 @@ def _target(
             if warn:
                 log.warning("%s is unreadable; rebuilding from cached pieces", marker)
             previous = {}
-    up_to_date = out.exists() and {k: previous.get(k) for k in state} == state
+    size = out.stat().st_size if out.exists() else None
+    if size == 0 and warn:  # what a power cut can leave of a finished render
+        log.warning("%s is empty; rendering it again", out)
+    up_to_date = bool(size) and {k: previous.get(k) for k in state} == state
     return script, out, state, previous, up_to_date
 
 
@@ -402,22 +405,33 @@ def preflight(
 def _join(files: list[Path], out: Path, tags: dict[str, str]) -> None:
     """Concatenate the pieces and tag them; publish atomically so Dropbox never syncs a half file."""
     tmp = out.with_name(f".{out.name}.part")
-    with tempfile.TemporaryDirectory() as td:
-        listing = Path(td) / "pieces.txt"
-        quoted = (str(f.resolve()).replace("'", "'\\''") for f in files)
-        listing.write_text("".join(f"file '{q}'\n" for q in quoted), encoding="utf-8")
-        # -xerror: without it a corrupt piece after a good one exits 0 with a truncated file.
-        cmd = ["ffmpeg", "-loglevel", "error", "-xerror", "-y", "-f", "concat", "-safe", "0",
-               "-i", str(listing), "-c", "copy", "-map_metadata", "-1", "-id3v2_version", "3"]  # fmt: skip
-        for k, v in tags.items():
-            cmd += ["-metadata", f"{k}={v}"]
-        proc = subprocess.run(
-            [*cmd, "-f", "mp3", str(tmp)], capture_output=True, text=True, check=False
-        )
-    if proc.returncode != 0:
-        tmp.unlink(missing_ok=True)
-        raise RenderError(f"ffmpeg failed: {proc.stderr.strip()[-500:]}")
-    os.replace(tmp, out)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            listing = Path(td) / "pieces.txt"
+            quoted = (str(f.resolve()).replace("'", "'\\''") for f in files)
+            listing.write_text(
+                "".join(f"file '{q}'\n" for q in quoted), encoding="utf-8"
+            )
+            # -xerror: without it a corrupt piece after a good one exits 0 with a truncated file.
+            cmd = ["ffmpeg", "-loglevel", "error", "-xerror", "-y", "-f", "concat", "-safe", "0",
+                   "-i", str(listing), "-c", "copy", "-map_metadata", "-1", "-id3v2_version", "3"]  # fmt: skip
+            for k, v in tags.items():
+                cmd += ["-metadata", f"{k}={v}"]
+            proc = subprocess.run(
+                [*cmd, "-f", "mp3", str(tmp)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        if proc.returncode != 0:
+            raise RenderError(f"ffmpeg failed: {proc.stderr.strip()[-500:]}")
+        # Or a power cut can keep the rename and lose the audio. rb+: Windows flushes
+        # only a handle that can write.
+        with open(tmp, "rb+") as f:
+            os.fsync(f.fileno())
+        os.replace(tmp, out)
+    finally:
+        tmp.unlink(missing_ok=True)  # gone after the rename; else never left in Dropbox
 
 
 def render_episode(

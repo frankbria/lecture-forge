@@ -1118,3 +1118,83 @@ def test_a_piece_is_synced_to_disk_before_it_joins_the_cache(
     run(series, tmp_path, FakeTTS(beep))
     cached = [(i, x[1]) for i, x in enumerate(order) if isinstance(x, tuple)]
     assert len(cached) == 2 and all(inode in order[:i] for i, inode in cached)
+
+
+def test_an_empty_episode_is_not_already_rendered(series, tmp_path, beep, caplog):
+    """A power cut just after a render can leave a zero-byte MP3 beside a valid render.json."""
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    out.write_bytes(b"")
+    plan = load_plan(series / "plan.yaml")
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == 0
+    assert not caplog.messages  # the cost preview rebuilds nothing, so it says nothing
+    again = FakeTTS(beep)
+    result = run(series, tmp_path, again)
+    assert not result.skipped and again.calls == [] and result.reused == 2
+    assert probe(out)[0] > 0.5  # rebuilt from the cached pieces
+    assert caplog.messages == [f"{out} is empty; rendering it again"]
+    assert run(series, tmp_path, FakeTTS(beep)).skipped
+
+
+def test_an_empty_episode_without_its_pieces_is_priced_before_it_is_paid_for(
+    series, tmp_path, beep
+):
+    first = FakeTTS(beep)
+    run(series, tmp_path, first).path.write_bytes(b"")
+    for f in (episode_dir(series, 1) / "audio").iterdir():
+        f.unlink()
+    plan = load_plan(series / "plan.yaml")
+    # The preview and the render decide alike, or the render would pay without a yes.
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == sum(
+        len(text) for text, _ in first.calls
+    )
+
+
+def test_the_episode_is_synced_to_disk_before_it_is_published(
+    series, tmp_path, beep, monkeypatch
+):
+    """A power cut can keep the rename and lose the audio: an empty episode in the
+    lecture folder, on a drive without ext4's ordering."""
+    order = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(
+        r.os, "fsync", lambda fd: (order.append(os.fstat(fd).st_ino), real_fsync(fd))
+    )
+
+    def replace(src, dst):
+        if os.path.dirname(os.path.dirname(dst)) == str(tmp_path / "Lectures"):
+            order.append(("published", os.stat(src).st_ino))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(r.os, "replace", replace)
+    run(series, tmp_path, FakeTTS(beep))
+    published = [(i, x[1]) for i, x in enumerate(order) if isinstance(x, tuple)]
+    assert len(published) == 1 and published[0][1] in order[: published[0][0]]
+
+
+def test_an_episode_that_cannot_be_published_leaves_no_temp_file(
+    series, tmp_path, beep
+):
+    """The album folder is in Dropbox: a leftover would be synced to every device."""
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    out.unlink()
+    (out / "in the way").mkdir(parents=True)  # the join succeeds, the rename can't
+    with pytest.raises(OSError):
+        run(series, tmp_path, FakeTTS(beep), force=True)
+    assert [p.name for p in out.parent.iterdir()] == [out.name]
+
+
+def test_an_interrupted_join_leaves_no_temp_file(series, tmp_path, beep, monkeypatch):
+    real_run = subprocess.run
+
+    def run_then_interrupt(cmd, **kw):
+        proc = real_run(cmd, **kw)
+        if (
+            "concat" in cmd
+        ):  # Ctrl-C as the join ends: ffmpeg has written the .part file
+            raise KeyboardInterrupt
+        return proc
+
+    monkeypatch.setattr(r.subprocess, "run", run_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        run(series, tmp_path, FakeTTS(beep))
+    assert not [p for p in (tmp_path / "Lectures").rglob("*") if p.is_file()]
