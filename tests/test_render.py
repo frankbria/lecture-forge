@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 
 import pytest
@@ -712,20 +713,17 @@ class CorruptAfter(FakeTTS):
 
 
 @pytest.mark.parametrize("corrupt", ["every piece", "after the first"])
-def test_ffmpeg_failure_leaves_no_partial_or_published_file(
-    series, tmp_path, beep, corrupt
-):
+def test_ffmpeg_failure_leaves_no_partial_or_published_file(tmp_path, beep, corrupt):
     """ffmpeg exits 0 after a good piece and a bad one, writing only the good part: that
-    truncated episode must never be published."""
-    tts = (
-        FakeTTS(b"not audio at all") if corrupt == "every piece" else CorruptAfter(beep)
-    )
+    truncated episode must never be published. (render_episode no longer hands the join a
+    bad piece, so this is the join's own guard.)"""
+    good, bad = tmp_path / "good.mp3", tmp_path / "bad.mp3"
+    good.write_bytes(beep)
+    bad.write_bytes(b"not audio at all")
+    first = bad if corrupt == "every piece" else good
     with pytest.raises(RenderError, match="ffmpeg failed"):
-        run(series, tmp_path, tts)
-    assert len(tts.calls) > 1  # the episode really had a piece after the first
-    out = tmp_path / "Lectures"
-    assert not list(out.rglob("*.mp3")) and not list(out.rglob("*.part"))
-    assert not (episode_dir(series, 1) / "render.json").exists()
+        r._join([first, bad], tmp_path / "out.mp3", {})
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["bad.mp3", "good.mp3"]
 
 
 def test_network_error_is_retried_then_succeeds():
@@ -766,6 +764,9 @@ def test_a_cache_only_rebuild_without_ffmpeg_fails_without_paying(
     with pytest.raises(RenderError, match="ffmpeg is not installed"):
         run(series, tmp_path, tts, force=True)
     assert tts.calls == []
+    plan = load_plan(series / "plan.yaml")
+    # The pieces can't be checked without ffmpeg: the preview still prices them as cached.
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path), force=True) == 0  # fmt: skip
 
 
 def test_render_without_ffmpeg_fails_before_asking_to_spend(
@@ -911,7 +912,11 @@ def test_a_render_stopped_mid_episode_keeps_what_it_measured(
 
 
 def test_a_join_that_fails_after_paying_keeps_the_measurement(series, tmp_path, beep):
-    tts = CorruptAfter(beep)
+    title = load_plan(series / "plan.yaml")["title"]
+    album = tmp_path / "Lectures" / safe_filename(title)
+    album.mkdir(parents=True)
+    album.chmod(0o555)  # every piece arrives, and the episode can't be written
+    tts = FakeTTS(beep)
     with pytest.raises(RenderError, match="ffmpeg failed"):
         run(series, tmp_path, tts, balance=readings(10000, 9560)[1])
     sent = sum(len(t) for t, _ in tts.calls)
@@ -995,3 +1000,110 @@ def test_a_measurement_that_cannot_be_saved_never_hides_the_real_error(
     with pytest.raises(RenderError, match="outage"):
         run(series, tmp_path, FakeTTS(beep, fail_at=1), balance=readings(10000, 9900)[1])  # fmt: skip
     assert "couldn't save the measured credits" in caplog.text
+
+
+# --- a bad piece in the cache (#64) -----------------------------------------------------------
+
+
+def _pieces(series, tmp_path):
+    """(text, cache file) of each piece of episode 1, in order."""
+    script = (episode_dir(series, 1) / "script.txt").read_text(encoding="utf-8")
+    audio = episode_dir(series, 1) / "audio"
+    keyed = r._keyed(settings(tmp_path), split_text(script, 5000))
+    return [(text, audio / f"{key}.mp3") for text, key in keyed]
+
+
+def _damaged(beep, how):
+    return {
+        "an error page": b"<html><body><h1>502 Bad Gateway</h1></body></html>",
+        "empty": b"",
+        "garbage inside": beep[:3000] + bytes(range(256)) * 8 + beep[3000:],
+        "cut in half": beep[: len(beep) // 2],
+    }[how]
+
+
+DAMAGE = ["an error page", "empty", "garbage inside", "cut in half"]
+
+
+@pytest.mark.parametrize("how", DAMAGE)
+def test_a_bad_cached_piece_is_named_priced_and_replaced(
+    series, tmp_path, beep, how, caplog
+):
+    """One bad file in the cache mustn't block the episode forever, or cost the good ones."""
+    run(series, tmp_path, FakeTTS(beep)).path.unlink()  # every piece cached, no episode
+    (_, good), (text, bad) = _pieces(series, tmp_path)
+    bad.write_bytes(_damaged(beep, how))
+    untouched = good.stat().st_mtime_ns
+    plan = load_plan(series / "plan.yaml")
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == len(text)
+    said = "episode 1: cached piece 2 of 2 isn't playable audio; rendering pays for it"
+    # said in the preview, before the yes
+    assert caplog.messages == [f"{said} again ({len(text):,} characters)"]
+    caplog.clear()
+    tts = FakeTTS(beep)
+    result = run(series, tmp_path, tts)
+    assert [t for t, _ in tts.calls] == [text]  # only the bad piece is paid for again
+    assert (result.billed, result.reused) == (len(text), 1)
+    assert bad.read_bytes() == beep and good.stat().st_mtime_ns == untouched
+    assert probe(result.path)[0] == pytest.approx(0.8, abs=0.15)  # both pieces, whole
+    assert not caplog.messages  # and not said twice
+
+
+@pytest.mark.parametrize("how", DAMAGE)
+def test_a_response_that_is_not_audio_is_never_cached(series, tmp_path, beep, how):
+    class BadSecond(FakeTTS):
+        def __call__(self, text, previous_ids):
+            audio, rid = super().__call__(text, previous_ids)
+            return (audio if len(self.calls) == 1 else _damaged(beep, how)), rid
+
+    (first, good), (second, _) = _pieces(series, tmp_path)
+    with pytest.raises(RenderError, match="episode 1: .* piece 2 of 2 isn't playable"):
+        run(series, tmp_path, BadSecond(beep), balance=readings(10000, 9560)[1])
+    kept = sorted(p.name for p in good.parent.iterdir())
+    assert kept == [good.name, good.with_suffix(".rid").name]  # no trace of piece 2
+    assert not list((tmp_path / "Lectures").rglob("*.mp3"))
+    sent = len(first) + len(second)  # the bad piece was sent too: it counts as paid
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(440 / sent)
+    retry = FakeTTS(beep)
+    result = run(series, tmp_path, retry)
+    assert [t for t, _ in retry.calls] == [second] and result.reused == 1
+
+
+def test_render_names_a_bad_cached_piece_before_asking_to_spend(
+    project, series, capsys, monkeypatch, caplog
+):
+    root, tts = project
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    paid = len(tts.calls)
+    next((root / "Lectures").rglob("01 - *.mp3")).unlink()
+    text, bad = _pieces(series, root)[1]
+    bad.write_bytes(b"<html>502</html>")
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    capsys.readouterr()
+    assert main(["render", "algebra", "--episode", "1"]) == 1
+    assert "episode 1: cached piece 2 of 2 isn't playable audio" in caplog.text
+    assert f": {len(text):,} characters to synthesize" in capsys.readouterr().out
+    assert len(tts.calls) == paid  # nothing is spent without the yes
+
+
+def test_a_piece_is_synced_to_disk_before_it_joins_the_cache(
+    series, tmp_path, beep, monkeypatch
+):
+    """A power cut can keep the rename and lose part of the audio, and a piece cut a little
+    short still plays, so nothing would notice: the data must be on disk first."""
+    order = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(
+        r.os, "fsync", lambda fd: (order.append(os.fstat(fd).st_ino), real_fsync(fd))
+    )
+
+    def replace(src, dst):
+        if str(dst).endswith(".mp3") and "audio" in str(dst):
+            order.append(("cached", os.stat(src).st_ino))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(r.os, "replace", replace)
+    run(series, tmp_path, FakeTTS(beep))
+    cached = [(i, x[1]) for i, x in enumerate(order) if isinstance(x, tuple)]
+    assert len(cached) == 2 and all(inode in order[:i] for i, inode in cached)
