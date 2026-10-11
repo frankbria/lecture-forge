@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -305,10 +306,12 @@ def credit_rate(series_dir: Path, model: str) -> float | None:
 
 
 def cost(
-    plan: dict, ep: dict, series_dir: Path, settings: Settings, *, force: bool = False
-) -> int:
+    plan: dict, ep: dict, series_dir: Path, settings: Settings,
+    *, force: bool = False, on_progress: OnProgress = ignore,
+) -> int:  # fmt: skip
     """Characters this episode would send to ElevenLabs now: 0 if it is already rendered
-    (and not forced), else only the pieces not yet cached."""
+    (and not forced), else only the pieces not yet cached. Each cached piece it has to
+    decode is reported first, as a "check" event."""
     # warn=False: a preview rebuilds nothing, and render_episode warns when it does.
     script, _, _, _, up_to_date = _target(plan, ep, series_dir, settings, warn=False)
     if up_to_date and not force:
@@ -318,7 +321,8 @@ def cost(
     chars = 0
     for k, (text, key) in enumerate(pieces, 1):
         mp3 = audio / f"{key}.mp3"
-        if _playable(mp3):
+        check = Progress("check", k, len(pieces), episode=ep["n"])
+        if _playable(mp3, partial(on_progress, check)):
             continue
         if mp3.exists():  # said here, before the yes: render_episode replaces it
             log.warning(
@@ -335,8 +339,17 @@ def require_ffmpeg() -> None:
         raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
 
 
-def _playable(mp3: Path) -> bool:
-    """Whether the file is there and ffmpeg decodes all of it as MP3 audio.
+# Files that passed _playable: (path, size, modification time in ns). In memory only.
+# shortcut: damage that changes neither a file's size nor its time isn't seen until the
+# next run; check the content (a hash kept beside each piece) if that ever happens.
+_passed: set[tuple[str, int, int]] = set()
+
+
+def _playable(mp3: Path, before_decode: Callable[[], None] = lambda: None) -> bool:
+    """Whether the file is there and ffmpeg decodes all of it as MP3 audio. A pass is
+    remembered while the file keeps its size and modification time, so a render decodes a
+    cached piece once, not in the preview and again when it reuses it. `before_decode` is
+    called when a decode (about a second for five minutes of audio) is about to run.
 
     An error page saved as audio, or a file damaged on disk, fails to decode: ffmpeg logs
     an error, and exits 0 all the same when the damage is past the start of the file (seen
@@ -347,6 +360,11 @@ def _playable(mp3: Path) -> bool:
         return False
     if shutil.which("ffmpeg") is None:  # can't tell, and nothing renders without ffmpeg
         return True
+    stat = mp3.stat()
+    key = (str(mp3.resolve()), stat.st_size, stat.st_mtime_ns)
+    if key in _passed:
+        return True
+    before_decode()
     # -nostdin: or ffmpeg takes the keys typed ahead of a front end's question.
     # -f mp3: other audio decodes too, and the join copies MP3 frames only.
     proc = subprocess.run(
@@ -354,7 +372,10 @@ def _playable(mp3: Path) -> bool:
          "-i", str(mp3.resolve()), "-f", "null", "-"], capture_output=True, check=False,
     )  # fmt: skip
     bad = (b"[error]", b"do not match")  # "filesize and duration do not match"
-    return proc.returncode == 0 and not any(sign in proc.stderr for sign in bad)
+    if proc.returncode != 0 or any(sign in proc.stderr for sign in bad):
+        return False  # not remembered: checked again each time, never taken for cached
+    _passed.add(key)
+    return True
 
 
 @dataclass(frozen=True)
@@ -399,6 +420,7 @@ def preflight(
     *,
     episode: int | None,
     force: bool,
+    on_progress: OnProgress = ignore,
 ) -> Preflight:
     """The cost of rendering one episode or every written one. Asked for all, unwritten and
     stale episodes are skipped; one requested episode raises why it can't render instead."""
@@ -420,7 +442,7 @@ def preflight(
             )
             rows.append((ep, None, why))
             continue
-        chars = cost(plan, ep, series_dir, settings, force=force)
+        chars = cost(plan, ep, series_dir, settings, force=force, on_progress=on_progress)  # fmt: skip
         rows.append((ep, chars, ""))
         total += chars
     left = characters_left(settings)

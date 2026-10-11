@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import wave
+from pathlib import Path
 
 import pytest
 import yaml
@@ -1345,3 +1346,111 @@ def test_render_errors_name_the_cli_command(project, capsys):
     assert capsys.readouterr().err.endswith(
         "); rewrite it: lecture-forge write algebra --episode 1\n"
     )
+
+
+# --- one decode per cached piece (#87) ---------------------------------------------------
+
+
+@pytest.fixture
+def decodes(monkeypatch):
+    """The files ffmpeg is asked to decode (the piece check). Each is still decoded."""
+    real, seen = subprocess.run, []
+
+    def counting(cmd, *args, **kw):
+        if cmd[0] == "ffmpeg" and cmd[-3:] == ["-f", "null", "-"]:
+            seen.append(cmd[cmd.index("-i") + 1])
+        return real(cmd, *args, **kw)
+
+    monkeypatch.setattr(r.subprocess, "run", counting)
+    return seen
+
+
+def _cached_episode(series, tmp_path, beep):
+    """(plan, episode 1, its piece files): every piece cached, no episode MP3."""
+    run(series, tmp_path, FakeTTS(beep)).path.unlink()
+    plan = load_plan(series / "plan.yaml")
+    pieces = [str(mp3.resolve()) for _, mp3 in _pieces(series, tmp_path)]
+    return plan, plan["episodes"][0], pieces
+
+
+def test_a_cached_piece_is_decoded_once_for_the_preview_and_the_render(
+    series, tmp_path, beep, decodes
+):
+    plan, ep, pieces = _cached_episode(series, tmp_path, beep)
+    decodes.clear()  # the first render checked what ElevenLabs sent it
+    assert r.cost(plan, ep, series, settings(tmp_path)) == 0
+    assert decodes == pieces
+    result = run(series, tmp_path, FakeTTS(beep))
+    assert (result.billed, result.reused) == (0, 2)
+    assert decodes == pieces  # the render reused the preview's answer
+    result.path.unlink()
+    assert r.cost(plan, ep, series, settings(tmp_path)) == 0
+    assert decodes == pieces  # and so does a second preview
+
+
+@pytest.mark.parametrize(
+    "change", ["same size, a later time", "same time, another size"]
+)
+def test_a_piece_changed_after_the_preview_is_checked_again(
+    series, tmp_path, beep, decodes, change
+):
+    plan, ep, (good, bad) = _cached_episode(series, tmp_path, beep)
+    assert r.cost(plan, ep, series, settings(tmp_path)) == 0  # both pass
+    before = os.stat(bad)
+    page = b"<html><body><h1>502 Bad Gateway</h1></body></html>"
+    if change == "same size, a later time":
+        Path(bad).write_bytes(page.ljust(before.st_size))
+        os.utime(bad, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+    else:
+        Path(bad).write_bytes(page)
+        os.utime(bad, ns=(before.st_atime_ns, before.st_mtime_ns))
+    decodes.clear()
+    tts = FakeTTS(beep)
+    result = run(series, tmp_path, tts)
+    assert (
+        decodes[0] == bad and good not in decodes
+    )  # only the changed one, before reuse
+    assert [t for t, _ in tts.calls] == [_pieces(series, tmp_path)[1][0]]  # paid again
+    assert Path(bad).read_bytes() == beep and result.reused == 1
+
+
+def test_a_failed_check_is_not_remembered(series, tmp_path, beep, decodes):
+    plan, ep, (good, bad) = _cached_episode(series, tmp_path, beep)
+    Path(bad).write_bytes(b"<html>502</html>")
+    for _ in range(2):
+        assert r.cost(plan, ep, series, settings(tmp_path)) > 0
+    assert (decodes.count(good), decodes.count(bad)) == (1, 2)
+
+
+def test_the_preview_reports_each_decode_and_none_it_can_skip(
+    series, tmp_path, beep, monkeypatch
+):
+    from lecture_forge.progress import Progress
+
+    monkeypatch.setattr(r, "characters_left", lambda s: 100)
+    plan, _, _ = _cached_episode(series, tmp_path, beep)
+    first, again, fresh = [], [], []
+    s = settings(tmp_path)
+    r.preflight(plan, series, s, episode=1, force=False, on_progress=first.append)
+    assert first == [
+        Progress("check", 1, 2, episode=1),
+        Progress("check", 2, 2, episode=1),
+    ]
+    r.preflight(plan, series, s, episode=1, force=False, on_progress=again.append)
+    assert (
+        again == []
+    )  # remembered: nothing is decoded, so there is nothing to wait for
+    r.preflight(plan, series, s, episode=2, force=False, on_progress=fresh.append)
+    assert fresh == []  # nothing cached yet
+
+
+def test_render_says_it_is_checking_cached_pieces_before_the_cost(project, capsys):
+    root, _ = project
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    assert "hecking" not in capsys.readouterr().out  # nothing was cached yet
+    next((root / "Lectures").rglob("01 - *.mp3")).unlink()
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "Checking episode 1's cached pieces..."
+    assert lines[1].startswith("Episode 1: ") and "0 characters" in lines[1]
+    assert lines.count(lines[0]) == 1  # once for the episode, not once for each piece
