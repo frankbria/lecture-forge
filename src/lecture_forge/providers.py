@@ -90,7 +90,7 @@ def check_pdf(name: str, pdf: Path, system: str, user: str, model: str = "") -> 
 def _too_large(name: str, found: str, why: str) -> ProviderError:
     return advised(
         ProviderError(name, f"the PDF is too large ({found}): {why}"),
-        ". Use a smaller page range: plan one chapter at a time (the outline lists the "
+        ". Use a smaller page range: plan one chapter at a time (the source's outline lists the "
         "chapter pages), or split the episode in plan.yaml. Or use the claude-code "
         "provider, which reads the pages as it goes",
         "smaller_part",

@@ -8,7 +8,7 @@ import yaml
 from test_source import BOOK_TOC, scanned_pdf, toc_pdf
 
 from lecture_forge import providers
-from lecture_forge.cli import main
+from lecture_forge.cli import _worded, main
 from lecture_forge.config import load_settings
 from lecture_forge.plan import (
     MAX_MINUTES,
@@ -591,10 +591,11 @@ def test_reusable_plan_is_the_existing_plan_only_for_the_same_source(tmp_path, b
     assert plan["source"].path == book.path.resolve()
     other = tmp_path / "other.md"
     other.write_text("x\n")
-    with pytest.raises(
-        PlanError, match="is a plan for .*; use another series for .*other.md$"
-    ):
+    with pytest.raises(PlanError) as e:
         reusable_plan(out, other, root=tmp_path)
+    is_for = f"{out} is a plan for {book.path.resolve()}"
+    assert str(e.value) == f"{is_for}; use another series for {other}"
+    assert _worded(e.value) == f"{is_for}; use another --series for {other}"
     out.write_text(
         "episodes: [", encoding="utf-8"
     )  # a broken plan is an error, not "none"
@@ -612,11 +613,15 @@ def test_reusable_plan_must_hold_an_episode_in_the_part_asked_for(tmp_path, book
     for part in [(2, 4), (1, 2), (4, 6), (3, 3), (1, 6)]:  # the edges count
         assert reusable_plan(out, book.path, root=tmp_path, part=part) is not None
     for part in [(1, 1), (5, 6)]:
-        with pytest.raises(
-            PlanError,
-            match=f"no episode in pages {part[0]}-{part[1]}; use another series for that part",
-        ):
+        with pytest.raises(PlanError) as e:
             reusable_plan(out, book.path, root=tmp_path, part=part)
+        empty = f"{out} has no episode in pages {part[0]}-{part[1]}"
+        assert (
+            str(e.value) == f"{empty}; use another series for that part of the source"
+        )
+        assert _worded(e.value) == (
+            f"{empty}; use another --series for that part of the source"
+        )
 
 
 def test_reusable_plan_resolves_a_relative_source_under_the_root(

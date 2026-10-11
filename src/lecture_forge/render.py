@@ -380,7 +380,7 @@ def preflight(
     episode: int | None,
     force: bool,
 ) -> Preflight:
-    """The cost of rendering one episode or every written one. With --all, unwritten and
+    """The cost of rendering one episode or every written one. Asked for all, unwritten and
     stale episodes are skipped; one requested episode raises why it can't render instead."""
     if episode is not None:
         todo = [e for e in plan["episodes"] if e["n"] == episode]

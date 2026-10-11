@@ -182,14 +182,15 @@ def make_plan(
 
 
 SLUG = re.compile(r"[a-z0-9][a-z0-9_-]*")  # a folder name: no paths, no surprises
+SLUG_RULE = (
+    "must be lowercase letters, digits, - or _"  # said of a front end's own field
+)
 
 
 def series_dir(root: str | Path, slug: str) -> Path:
     """Where a series lives in the project at `root`; the slug becomes a folder name."""
     if not SLUG.fullmatch(slug):
-        raise ValueError(
-            f"a series name must be lowercase letters, digits, - or _, got {slug!r}"
-        )
+        raise ValueError(f"a series name {SLUG_RULE}, got {slug!r}")
     return Path(root) / "series" / slug
 
 
@@ -223,7 +224,7 @@ def write_plan(
     if path.exists() and not force:
         raise advised(
             FileExistsError(f"{path} exists and may hold your edits"),
-            "; replacing it has to be asked for",
+            "; it is replaced only if you ask for that",
             "replace_plan",
         )
     unit = "pages" if src.kind == "pdf" else "lines"

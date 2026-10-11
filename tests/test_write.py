@@ -1136,5 +1136,6 @@ def test_write_one_written_episode_names_the_cli_flag(project, capsys):
     with pytest.raises(FileExistsError) as e:  # the engine names no flag
         episodes_to_write(load_plan(sdir / "plan.yaml"), sdir, episode=1, force=False)
     assert (
-        str(e.value) == "episode 1 is already written; rewriting it has to be asked for"
+        str(e.value)
+        == "episode 1 is already written; it is rewritten only if you ask for that"
     )

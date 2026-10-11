@@ -9,6 +9,7 @@ from lecture_forge.config import ConfigError, Settings, load_settings
 from lecture_forge.plan import (
     MAX_MINUTES,
     SLUG,
+    SLUG_RULE,
     PlanError,
     load_plan,
     make_plan,
@@ -141,11 +142,12 @@ def _part(args: argparse.Namespace, src: Source) -> tuple[int, int]:
 
 
 def _check_series(slug: str) -> Path:
-    if not SLUG.fullmatch(slug):  # the engine's rule, named by this front end's flag
-        raise ValueError(
-            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
-        )
-    return series_dir(ROOT, slug)
+    try:
+        return series_dir(ROOT, slug)
+    except (
+        ValueError
+    ):  # the name breaks the engine's rule: say it of this front end's flag
+        raise ValueError(f"--series {SLUG_RULE}, got {slug!r}") from None
 
 
 def _continues(args: argparse.Namespace) -> str:

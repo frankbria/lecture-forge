@@ -457,7 +457,10 @@ def test_pdf_over_the_providers_limit_fails_before_upload(
         complete(name, "s", "u", pdf, settings=settings(**KEYS), sleep=pytest.fail)
     msg = str(info.value)
     assert why in msg and not info.value.retryable
-    assert "one chapter at a time (the outline lists" in msg and "claude-code" in msg
+    assert (
+        "one chapter at a time (the source's outline lists" in msg
+        and "claude-code" in msg
+    )
     assert "plan.yaml" in msg  # write: the episode's range comes from the plan
     assert " 1 pages" not in msg
 
@@ -691,4 +694,8 @@ def test_cli_names_its_flags_when_a_pdf_is_too_large(tmp_path, no_upload, capsys
         "plan.yaml. Or use the claude-code provider, which reads the pages as it goes\n"
     )
     assert str(info.value).startswith(shown[len("error: ") : shown.index(". Use")])
-    assert "--range" not in str(info.value) and "lecture-forge" not in str(info.value)
+    assert str(info.value).endswith(
+        " pages. Use a smaller page range: plan one chapter at a time (the source's "
+        "outline lists the chapter pages), or split the episode in plan.yaml. Or use the "
+        "claude-code provider, which reads the pages as it goes"
+    )

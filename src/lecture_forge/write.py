@@ -338,7 +338,7 @@ def episodes_to_write(
         if script_state(series_dir, plan, todo[0]) == "current" and not force:
             raise advised(
                 FileExistsError(f"episode {episode} is already written"),
-                "; rewriting it has to be asked for",
+                "; it is rewritten only if you ask for that",
                 "rewrite_episode",
             )
     else:

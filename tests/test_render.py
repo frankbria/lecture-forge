@@ -245,7 +245,7 @@ def test_voice_change_invalidates_the_cache(series, tmp_path, beep):
 
 
 def test_unwritten_episode_cannot_be_rendered(series, tmp_path, beep):
-    with pytest.raises(RenderError, match="write episode 3 first"):
+    with pytest.raises(RenderError, match="^write episode 3 first$"):
         run(series, tmp_path, FakeTTS(beep), n=3)
 
 
