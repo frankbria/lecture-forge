@@ -23,11 +23,12 @@ def test_outline_numbers_the_chapters_of_a_pdf(tmp_path, capsys):
 
 
 def test_outline_leaves_a_bookmark_that_is_no_chapter_unnumbered(tmp_path, capsys):
-    toc = [[1, "Cover", 1], [1, "Cover", 1], [1, "Ch 1", 3], [1, "Back", 2], [1, "Ch 2", 6]]  # fmt: skip
+    toc = [[1, "Cover", 1], [1, "Cover", 1], [2, "Ch 1", 3], [1, "Ch 1", 3], [1, "Back", 2], [1, "Ch 2", 6]]  # fmt: skip
     main(["outline", str(toc_pdf(tmp_path / "book.pdf", 8, toc))])
     assert capsys.readouterr().out.splitlines()[1:] == [
         "1. Cover  [1]",
         "Cover  [1]",
+        "  Ch 1  [3]",
         "2. Ch 1  [3]",
         "Back  [2]",
         "3. Ch 2  [6]",

@@ -328,24 +328,29 @@ def test_plan_command_rejects_bad_range(project, book, rng, capsys):
     assert "range" in capsys.readouterr().err.lower()
 
 
+@pytest.mark.parametrize(
+    "n,title,start,end", [(1, "Ch 1", 1, 4), (2, "Ch 2", 5, 8), (3, "Index", 9, 10)]
+)
 def test_plan_command_chapter_plans_that_bookmarks_pages(
-    project, tmp_path, monkeypatch, capsys
+    project, tmp_path, monkeypatch, capsys, n, title, start, end
 ):
     seen = {}
 
     def planner(system, user, pdf, settings):
         seen["pages"], seen["user"] = pymupdf.open(pdf).page_count, user
-        return plan_json(episode(5, 8))
+        return plan_json(episode(start, end))
 
     monkeypatch.setitem(providers.PROVIDERS, "anthropic", planner)
     book = toc_pdf(tmp_path / "book.pdf", 10, BOOK_TOC)
-    assert main(["plan", str(book), "--series", "s", "--chapter", "2", "--auto"]) == 0
+    args = ["plan", str(book), "--series", "s", "--chapter", str(n), "--auto"]
+    assert main(args) == 0
+    where = f"pages {start}-{end}"
     out = capsys.readouterr().out
-    assert "Chapter 2: Ch 2, pages 5-8\nPlanning book.pdf pages 5-8 with" in out
-    assert seen["pages"] == 4
-    assert "first page of the attached PDF is source page 5" in seen["user"]
+    assert f"Chapter {n}: {title}, {where}\nPlanning book.pdf {where} with" in out
+    assert seen["pages"] == end - start + 1
+    assert f"Source: book.pdf. Plan {where}." in seen["user"]
     plan = load_plan(project / "series/s/plan.yaml")
-    assert [(e["start"], e["end"]) for e in plan["episodes"]] == [(5, 8)]
+    assert [(e["start"], e["end"]) for e in plan["episodes"]] == [(start, end)]
 
 
 @pytest.mark.parametrize("n", ["0", "4", "9", "-1"])
