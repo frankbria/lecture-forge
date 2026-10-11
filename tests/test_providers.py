@@ -1,5 +1,8 @@
+import http.server
+import json
 import os
 import shutil
+import threading
 from pathlib import Path
 
 import pymupdf
@@ -153,8 +156,11 @@ def test_claude_code_reads_pdf_on_subscription(theorem_pdf, monkeypatch):
 @pytest.mark.integration
 @pytest.mark.paid  # a few cents of API usage
 @pytest.mark.skipif(not REAL.anthropic_api_key, reason="ANTHROPIC_API_KEY not set")
-def test_anthropic_reads_pdf(theorem_pdf):
+def test_anthropic_reads_pdf(theorem_pdf, caplog):
     ask_theorem("anthropic", theorem_pdf)
+    assert (
+        "couldn't count" not in caplog.text
+    )  # the live count_tokens took the PDF (#53)
 
 
 @pytest.mark.integration
@@ -543,3 +549,126 @@ def test_complete_switching_gives_up_without_a_valid_choice(fake, choose):
         providers.complete_switching(
             settings(provider="fake", anthropic_api_key="k"), "s", "u", choose=choose
         )
+
+
+# --- token count before an anthropic PDF request (#53) -----------------------------------
+
+STREAM = [
+    {"type": "message_start", "message": {
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "m", "content": [],
+        "stop_reason": None, "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1}}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "ok"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+     "usage": {"output_tokens": 1}},
+    {"type": "message_stop"},
+]  # fmt: skip
+
+
+@pytest.fixture
+def claude_api(monkeypatch):
+    """A local stand-in for the Claude API, reached by the real SDK. `api.count` is what
+    count_tokens answers: a token count, an HTTP status to fail with, or (a string) the
+    body of a 200 reply. A message request is answered "ok". `api.seen` lists (path, body)
+    of every request."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            path = self.path.split("?")[0]
+            api.seen.append((path, body))
+            status, kind = 200, "application/json"
+            if not path.endswith("count_tokens"):
+                kind = "text/event-stream"
+                reply = "".join(
+                    f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in STREAM
+                )
+            elif isinstance(api.count, str):
+                reply = api.count
+                kind = "text/html" if reply.startswith("<") else kind
+            elif api.count < 1000:
+                status, reply = api.count, '{"type": "error"}'
+            else:
+                reply = json.dumps({"input_tokens": api.count})
+            self.send_response(status)
+            self.send_header("content-type", kind)
+            self.send_header("content-length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply.encode())
+
+        def log_message(self, *args):
+            pass
+
+    api = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    api.seen, api.count = [], 1000
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", f"http://127.0.0.1:{api.server_port}")
+    for name in (
+        "NO_PROXY",
+        "no_proxy",
+    ):  # a proxy in the environment would get the calls
+        monkeypatch.setenv(name, "127.0.0.1")
+    yield api
+    api.shutdown()
+    api.server_close()
+
+
+@pytest.mark.parametrize(
+    "model,count,window",
+    [("", 936_001, "claude-opus-5-5 has a 1,000,000-token context window"),
+     ("claude-haiku-4-5", 136_001, "claude-haiku-4-5 has a 200,000-token context window")],
+)  # fmt: skip
+def test_pdf_over_the_context_window_fails_before_the_request(
+    tmp_path, claude_api, model, count, window
+):
+    claude_api.count = count
+    pdf = big_pdf(tmp_path / "source.pdf")
+    s = settings(**KEYS, llm_model=model)
+    with pytest.raises(ProviderError) as info:
+        complete("anthropic", "s", "u", pdf, settings=s, sleep=pytest.fail)
+    msg = str(info.value)
+    assert f"{count:,} input tokens" in msg and window in msg
+    assert "64,000" in msg and not info.value.retryable
+    assert "--range" in msg and "plan.yaml" in msg and "claude-code" in msg
+    assert [path for path, _ in claude_api.seen] == ["/v1/messages/count_tokens"]
+
+
+@pytest.mark.parametrize(
+    "model,count", [("claude-sonnet-5-5", 936_000), ("claude-haiku-4-5", 136_000)]
+)
+def test_pdf_that_just_fits_the_context_window_is_sent(
+    tmp_path, claude_api, model, count
+):
+    claude_api.count = count  # plus 64,000 for the reply: exactly the window
+    pdf = big_pdf(tmp_path / "source.pdf")
+    s = settings(**KEYS, llm_model=model)
+    assert complete("anthropic", "s", "u", pdf, settings=s) == "ok"
+    (counted, count), (sent, request) = claude_api.seen
+    assert (counted, sent) == ("/v1/messages/count_tokens", "/v1/messages")
+    for key in ("model", "system", "messages"):  # what was counted is what was sent
+        assert count[key] == request[key]
+    assert [part["type"] for part in count["messages"][0]["content"]] == ["document", "text"]  # fmt: skip
+    assert request["max_tokens"] == providers.MAX_TOKENS == 64_000
+    assert request["model"] == model
+
+
+@pytest.mark.parametrize(
+    "count", [500, 404, "{}", '{"input_tokens": "many"}', '{"input_tok', "<html>proxy</html>"]
+)  # fmt: skip
+def test_a_failed_token_count_does_not_block_the_request(
+    tmp_path, claude_api, caplog, count
+):
+    claude_api.count = count
+    pdf = big_pdf(tmp_path / "source.pdf")
+    s = settings(**KEYS)
+    assert complete("anthropic", "s", "u", pdf, settings=s, sleep=pytest.fail) == "ok"
+    assert [path for path, _ in claude_api.seen][-1] == "/v1/messages"
+    assert "couldn't count the tokens (" in caplog.text
+    assert "Error: " in caplog.text and "sending it anyway" in caplog.text
+
+
+def test_a_text_request_is_not_counted(claude_api):
+    assert complete("anthropic", "s", "u", settings=settings(**KEYS)) == "ok"
+    assert [path for path, _ in claude_api.seen] == ["/v1/messages"]

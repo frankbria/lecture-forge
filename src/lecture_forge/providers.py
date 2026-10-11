@@ -30,6 +30,7 @@ DEFAULT_MODELS = {
     "openai": "gpt-5.5",
 }
 TIMEOUT_S = 1800  # a full script plus critique can take many minutes
+MAX_TOKENS = 64000  # the reply's share of the context window
 # Per-request PDF limits (provider docs): Claude API 600 pages (100 on 200k-context models)
 # and 32 MB per request, base64 included; OpenAI 50 MB per file, no documented page limit.
 CLAUDE_1M = re.compile(
@@ -82,13 +83,46 @@ def check_pdf(name: str, pdf: Path, system: str, user: str, model: str = "") -> 
         why = f"{name} takes at most {MAX_PDF_BYTES[name] // 10**6} MB per PDF"
     else:
         return
-    raise ProviderError(
+    raise _too_large(name, found, why)
+
+
+def _too_large(name: str, found: str, why: str) -> ProviderError:
+    return ProviderError(
         name,
         f"the PDF is too large ({found}): {why}. Use a smaller page range: plan one "
         "chapter at a time with --range (lecture-forge outline lists the chapter pages), "
         "or split the episode in plan.yaml. Or use the claude-code provider, which reads "
         "the pages as it goes",
     )
+
+
+def check_context(
+    client: anthropic.Anthropic, model: str, system: str, messages: list
+) -> None:
+    """Refuse a PDF request over the model's context window before the real request.
+
+    Counting is free, but it uploads the PDF once more. If the count itself fails, the
+    request goes ahead and the API decides."""
+    window = 1_000_000 if CLAUDE_1M.match(model) else 200_000
+    try:
+        tokens = client.messages.count_tokens(
+            model=model, system=system, messages=messages
+        ).input_tokens
+        over = tokens + MAX_TOKENS > window
+    # besides API errors: a 200 reply that isn't a count (a proxy's page, a cut-off body)
+    except (anthropic.APIError, ValueError, TypeError, AttributeError) as e:
+        log.warning(
+            "anthropic: couldn't count the tokens (%s: %s); sending it anyway",
+            type(e).__name__, e,
+        )  # fmt: skip
+        return
+    if over:
+        raise _too_large(
+            "anthropic",
+            f"{tokens:,} input tokens",
+            f"{model} has a {window:,}-token context window, and {MAX_TOKENS:,} of it "
+            "is kept for the reply",
+        )
 
 
 def _b64(pdf: Path) -> str:
@@ -178,12 +212,15 @@ def _anthropic(system: str, user: str, pdf: Path | None, settings: Settings) -> 
             }
         )
     content.append({"type": "text", "text": user})
+    messages = [{"role": "user", "content": content}]
+    if pdf:
+        check_context(client, model, system, messages)
     try:
         with client.beta.messages.stream(
             model=model,
-            max_tokens=64000,
+            max_tokens=MAX_TOKENS,
             system=system,
-            messages=[{"role": "user", "content": content}],
+            messages=messages,
             output_config={"effort": "high"},
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",  # a refused request is re-run on a fallback model
