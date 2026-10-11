@@ -103,15 +103,17 @@ def check_context(
 
     Counting is free, but it uploads the PDF once more. If the count itself fails, the
     request goes ahead and the API decides."""
+    window = 1_000_000 if CLAUDE_1M.match(model) else 200_000
     try:
         tokens = client.messages.count_tokens(
             model=model, system=system, messages=messages
         ).input_tokens
-    except anthropic.APIError as e:
-        log.warning("anthropic: couldn't count the tokens (%s); sending it anyway", e)
+        over = tokens + MAX_TOKENS > window
+    # besides API errors: a 200 reply that isn't a count (a proxy's page, a cut-off body)
+    except (anthropic.APIError, ValueError, TypeError, AttributeError) as e:
+        log.warning("anthropic: couldn't count the tokens (%r); sending it anyway", e)
         return
-    window = 1_000_000 if CLAUDE_1M.match(model) else 200_000
-    if tokens + MAX_TOKENS > window:
+    if over:
         raise _too_large(
             "anthropic",
             f"{tokens:,} input tokens",

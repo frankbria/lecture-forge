@@ -156,8 +156,11 @@ def test_claude_code_reads_pdf_on_subscription(theorem_pdf, monkeypatch):
 @pytest.mark.integration
 @pytest.mark.paid  # a few cents of API usage
 @pytest.mark.skipif(not REAL.anthropic_api_key, reason="ANTHROPIC_API_KEY not set")
-def test_anthropic_reads_pdf(theorem_pdf):
+def test_anthropic_reads_pdf(theorem_pdf, caplog):
     ask_theorem("anthropic", theorem_pdf)
+    assert (
+        "couldn't count" not in caplog.text
+    )  # the live count_tokens took the PDF (#53)
 
 
 @pytest.mark.integration
@@ -567,8 +570,9 @@ STREAM = [
 @pytest.fixture
 def claude_api(monkeypatch):
     """A local stand-in for the Claude API, reached by the real SDK. `api.count` is what
-    count_tokens answers: a token count, or an HTTP status to fail with. A message request
-    is answered "ok". `api.seen` lists (path, body) of every request."""
+    count_tokens answers: a token count, an HTTP status to fail with, or (a string) the
+    body of a 200 reply. A message request is answered "ok". `api.seen` lists (path, body)
+    of every request."""
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
@@ -581,6 +585,9 @@ def claude_api(monkeypatch):
                 reply = "".join(
                     f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in STREAM
                 )
+            elif isinstance(api.count, str):
+                reply = api.count
+                kind = "text/html" if reply.startswith("<") else kind
             elif api.count < 1000:
                 status, reply = api.count, '{"type": "error"}'
             else:
@@ -598,6 +605,11 @@ def claude_api(monkeypatch):
     api.seen, api.count = [], 1000
     threading.Thread(target=api.serve_forever, daemon=True).start()
     monkeypatch.setenv("ANTHROPIC_BASE_URL", f"http://127.0.0.1:{api.server_port}")
+    for name in (
+        "NO_PROXY",
+        "no_proxy",
+    ):  # a proxy in the environment would get the calls
+        monkeypatch.setenv(name, "127.0.0.1")
     yield api
     api.shutdown()
     api.server_close()
@@ -623,25 +635,35 @@ def test_pdf_over_the_context_window_fails_before_the_request(
     assert [path for path, _ in claude_api.seen] == ["/v1/messages/count_tokens"]
 
 
-def test_pdf_that_just_fits_the_context_window_is_sent(tmp_path, claude_api):
-    claude_api.count = 936_000  # plus 64,000 for the reply: exactly the window
+@pytest.mark.parametrize(
+    "model,count", [("claude-sonnet-5-5", 936_000), ("claude-haiku-4-5", 136_000)]
+)
+def test_pdf_that_just_fits_the_context_window_is_sent(
+    tmp_path, claude_api, model, count
+):
+    claude_api.count = count  # plus 64,000 for the reply: exactly the window
     pdf = big_pdf(tmp_path / "source.pdf")
-    assert complete("anthropic", "s", "u", pdf, settings=settings(**KEYS)) == "ok"
+    s = settings(**KEYS, llm_model=model)
+    assert complete("anthropic", "s", "u", pdf, settings=s) == "ok"
     (counted, count), (sent, request) = claude_api.seen
     assert (counted, sent) == ("/v1/messages/count_tokens", "/v1/messages")
     for key in ("model", "system", "messages"):  # what was counted is what was sent
         assert count[key] == request[key]
     assert [part["type"] for part in count["messages"][0]["content"]] == ["document", "text"]  # fmt: skip
     assert request["max_tokens"] == providers.MAX_TOKENS == 64_000
+    assert request["model"] == model
 
 
-@pytest.mark.parametrize("status", [500, 404])
+@pytest.mark.parametrize(
+    "count", [500, 404, "{}", '{"input_tokens": "many"}', '{"input_tok', "<html>proxy</html>"]
+)  # fmt: skip
 def test_a_failed_token_count_does_not_block_the_request(
-    tmp_path, claude_api, caplog, status
+    tmp_path, claude_api, caplog, count
 ):
-    claude_api.count = status
+    claude_api.count = count
     pdf = big_pdf(tmp_path / "source.pdf")
-    assert complete("anthropic", "s", "u", pdf, settings=settings(**KEYS)) == "ok"
+    s = settings(**KEYS)
+    assert complete("anthropic", "s", "u", pdf, settings=s, sleep=pytest.fail) == "ok"
     assert [path for path, _ in claude_api.seen][-1] == "/v1/messages"
     assert "couldn't count" in caplog.text and "sending it anyway" in caplog.text
 
