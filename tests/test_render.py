@@ -563,14 +563,18 @@ def marker(series, n=1):
     )
 
 
+def measured(series, n=1, model="eleven_v3"):
+    """What episode n's render.json holds for `model`, or None."""
+    return marker(series, n).get("measured", {}).get(model)
+
+
 def test_render_records_the_credits_it_used_and_a_skip_reads_no_balance(
     series, tmp_path, beep
 ):
     calls, balance = readings(10000, 9560)
     result = run(series, tmp_path, FakeTTS(beep), balance=balance)
     assert result.credits == 440 and len(calls) == 2  # before and after, not per piece
-    m = marker(series)
-    assert m["chars_sent"] == result.billed and m["credits_used"] == 440
+    assert measured(series) == {"chars_sent": result.billed, "credits_used": 440}
     calls, balance = readings()
     again = run(series, tmp_path, FakeTTS(beep), balance=balance)
     assert (
@@ -586,7 +590,7 @@ def test_a_balance_that_did_not_drop_records_no_measurement(
     series, tmp_path, beep, before, after
 ):
     result = run(series, tmp_path, FakeTTS(beep), balance=readings(before, after)[1])
-    assert result.credits is None and "credits_used" not in marker(series)
+    assert result.credits is None and "measured" not in marker(series)
 
 
 def test_a_fully_cached_render_reads_no_balance(series, tmp_path, beep):
@@ -603,9 +607,11 @@ def test_a_rebuild_keeps_the_measurement_of_the_same_model(series, tmp_path, bee
     data["episodes"][0]["title"] = "Cosets, Renamed"
     plan_path.write_text(yaml.safe_dump(data), encoding="utf-8")
     run(series, tmp_path, FakeTTS(beep))  # from cache, nothing measured
-    assert marker(series)["credits_used"] == 440
+    assert measured(series)["credits_used"] == 440
     run(series, tmp_path, FakeTTS(beep), model="eleven_multilingual_v2")
-    assert "credits_used" not in marker(series)  # never credited to another model
+    # Kept for its own model, and not counted for the other.
+    assert measured(series)["credits_used"] == 440
+    assert measured(series, model="eleven_multilingual_v2") is None
 
 
 def test_an_edit_adds_its_measurement_to_the_episodes_earlier_one(
@@ -618,8 +624,9 @@ def test_an_edit_adds_its_measurement_to_the_episodes_earlier_one(
     )
     edit = run(series, tmp_path, FakeTTS(beep), balance=readings(9560, 9550)[1])
     assert edit.credits == 10  # this run's own cost
-    m = marker(series)  # the big sample isn't replaced by the small one
-    assert m["chars_sent"] == first.billed + edit.billed and m["credits_used"] == 450
+    assert measured(series) == {  # the big sample isn't replaced by the small one
+        "chars_sent": first.billed + edit.billed, "credits_used": 450,
+    }  # fmt: skip
 
 
 def test_credit_rate_is_measured_per_series_and_model(tmp_path):
@@ -690,7 +697,7 @@ def test_render_all_measures_each_episode_between_its_own_balance_reads(
     monkeypatch.setattr(r, "characters_left", lambda s: next(vals))
     assert main(["render", "algebra", "--all", "--yes"]) == 0
     sdir = root / "series" / "algebra"
-    assert [marker(sdir, n)["credits_used"] for n in (1, 2)] == [1000, 500]
+    assert [measured(sdir, n)["credits_used"] for n in (1, 2)] == [1000, 500]
 
 
 # --- failure paths on the money path (#28) ------------------------------------------------
@@ -909,9 +916,12 @@ def test_a_render_stopped_mid_episode_keeps_what_it_measured(
         paid = fails(series, tmp_path, Interrupted(beep), 10000, 9900, KeyboardInterrupt)  # fmt: skip
     assert r.credit_rate(series, "eleven_v3") == pytest.approx(100 / paid)
     result = run(series, tmp_path, FakeTTS(beep), balance=readings(9900, 9000)[1])
-    m = marker(series)  # the run that finishes adds its own cost to the failed run's
-    assert result.credits == 900 and "unfinished" not in m
-    assert m["chars_sent"] == paid + result.billed and m["credits_used"] == 1000
+    # The run that finishes adds its cost to the failed run's.
+    assert result.credits == 900
+    assert measured(series) == {
+        "chars_sent": paid + result.billed,
+        "credits_used": 1000,
+    }
 
 
 def test_a_join_that_fails_after_paying_keeps_the_measurement(series, tmp_path, beep):
@@ -925,7 +935,7 @@ def test_a_join_that_fails_after_paying_keeps_the_measurement(series, tmp_path, 
     sent = sum(len(t) for t, _ in tts.calls)
     assert r.credit_rate(series, "eleven_v3") == pytest.approx(440 / sent)
     assert not list((tmp_path / "Lectures").rglob("*.mp3"))  # still nothing published
-    assert set(marker(series)) == {"unfinished"}  # and nothing marked as rendered
+    assert set(marker(series)) == {"measured"}  # and nothing marked as rendered
     calls, balance = readings()
     with pytest.raises(RenderError, match="ffmpeg failed"):  # a join-only retry
         run(series, tmp_path, FakeTTS(beep), balance=balance)
@@ -942,11 +952,10 @@ def test_failed_runs_add_up_and_a_balance_that_did_not_drop_adds_nothing(
     a = fails(series, tmp_path, FakeTTS(beep, fail_at=1), 10000, 9900)
     fails(series, tmp_path, FakeTTS(beep, fail_at=1), 9900, 9900)
     assert marker(series) == {
-        "unfinished": {"model": "eleven_v3", "chars_sent": a, "credits_used": 100}
+        "measured": {"eleven_v3": {"chars_sent": a, "credits_used": 100}}
     }
     b = fails(series, tmp_path, FakeTTS(beep, fail_at=1), 9900, 9700)
-    unfinished = marker(series)["unfinished"]
-    assert unfinished["chars_sent"] == a + b and unfinished["credits_used"] == 300
+    assert measured(series) == {"chars_sent": a + b, "credits_used": 300}
 
 
 def test_a_failed_rerender_leaves_the_finished_render_as_it_was(series, tmp_path, beep):
@@ -956,11 +965,12 @@ def test_a_failed_rerender_leaves_the_finished_render_as_it_was(series, tmp_path
     original = script.read_text(encoding="utf-8")
     _three_pieces(series)
     paid = fails(series, tmp_path, FakeTTS(beep, fail_at=1), 9560, 9500)
-    m = marker(series)
-    assert m.pop("unfinished")["credits_used"] == 60 and m == finished
-    assert r.credit_rate(series, "eleven_v3") == pytest.approx(
-        500 / (finished["chars_sent"] + paid)
-    )
+    m, sent = marker(series), finished.pop("measured")["eleven_v3"]["chars_sent"]
+    assert m.pop("measured") == {
+        "eleven_v3": {"chars_sent": sent + paid, "credits_used": 500}
+    }
+    assert m == finished  # what marks the episode as rendered is untouched
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(500 / (sent + paid))
     script.write_text(original, encoding="utf-8")
     calls, balance = readings()
     assert run(series, tmp_path, FakeTTS(beep), balance=balance).skipped
@@ -972,14 +982,140 @@ def test_an_unfinished_measurement_is_never_credited_to_another_model(
 ):
     _three_pieces(series)  # 3 pieces at 10k
     other = "eleven_multilingual_v2"
-    fails(series, tmp_path, FakeTTS(beep, fail_at=1), 10000, 9900)
+    first = fails(series, tmp_path, FakeTTS(beep, fail_at=1), 10000, 9900)
     paid = fails(series, tmp_path, FakeTTS(beep, fail_at=1), 9900, 9850, model=other)
-    assert marker(series)["unfinished"] == {
-        "model": other, "chars_sent": paid, "credits_used": 50,
-    }  # fmt: skip
+    each = {
+        "eleven_v3": {"chars_sent": first, "credits_used": 100},
+        other: {"chars_sent": paid, "credits_used": 50},
+    }
+    assert marker(series) == {"measured": each}  # the other model's try lost nothing
     run(series, tmp_path, FakeTTS(beep))  # finished in eleven_v3, nothing measured
-    m = marker(series)
-    assert "credits_used" not in m and "unfinished" not in m
+    assert marker(series)["measured"] == each
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(100 / first)
+    assert r.credit_rate(series, other) == pytest.approx(50 / paid)
+
+
+def test_trying_another_model_keeps_each_models_measurement(series, tmp_path, beep):
+    other = "eleven_multilingual_v2"
+    first = run(series, tmp_path, FakeTTS(beep), balance=readings(10000, 9560)[1])
+    second = run(
+        series, tmp_path, FakeTTS(beep), model=other, balance=readings(9560, 8560)[1]
+    )
+    each = {
+        "eleven_v3": {"chars_sent": first.billed, "credits_used": 440},
+        other: {"chars_sent": second.billed, "credits_used": 1000},
+    }
+    assert marker(series)["measured"] == each and marker(series)["model"] == other
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(440 / first.billed)
+    assert r.credit_rate(series, other) == pytest.approx(1000 / second.billed)
+    # Back to eleven_v3, from its cached pieces: nothing sent, nothing added or lost.
+    again = run(series, tmp_path, FakeTTS(beep))
+    assert again.billed == 0 and marker(series)["model"] == "eleven_v3"
+    assert marker(series)["measured"] == each
+
+
+OLD = {  # a render.json from before "measured": the top level, and "unfinished"
+    "model": "eleven_v3", "voice": "voice-1", "chars_sent": 1000, "credits_used": 440,
+    "unfinished": {"model": "eleven_multilingual_v2", "chars_sent": 10, "credits_used": 10},
+}  # fmt: skip
+
+
+def test_an_older_render_json_is_read_as_it_is_and_rewritten_once(
+    series, tmp_path, beep
+):
+    other = "eleven_multilingual_v2"
+    path = episode_dir(series, 1) / "render.json"
+    path.write_text(json.dumps(OLD), encoding="utf-8")
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(0.44)
+    assert r.credit_rate(series, other) == pytest.approx(1.0)
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(9000, 8900)[1])
+    m, sent = marker(series), 1000 + result.billed
+    assert m["measured"] == {
+        "eleven_v3": {"chars_sent": sent, "credits_used": 540},
+        other: {"chars_sent": 10, "credits_used": 10},
+    }
+    assert not {"chars_sent", "credits_used", "unfinished"} & set(m)  # or counted twice
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(540 / sent)
+    assert r.credit_rate(series, other) == pytest.approx(1.0)
+
+
+def test_an_older_files_two_places_add_up_for_one_model(series, tmp_path, beep):
+    """A finished render and a later failed one, both in eleven_v3, as main wrote them."""
+    old = {
+        "model": "eleven_v3", "chars_sent": 1000, "credits_used": 440,
+        "unfinished": {"model": "eleven_v3", "chars_sent": 500, "credits_used": 260},
+    }  # fmt: skip
+    path = episode_dir(series, 1) / "render.json"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(700 / 1500)
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(9000, 8900)[1])
+    assert marker(series)["measured"] == {
+        "eleven_v3": {"chars_sent": 1500 + result.billed, "credits_used": 800}
+    }
+
+
+@pytest.mark.parametrize(
+    "previous",
+    [
+        {"chars_sent": 1000, "credits_used": 440},  # no model: nobody's measurement
+        {"unfinished": {"model": 3, "chars_sent": 9, "credits_used": 9}},
+        {"model": "eleven_v3", "measured": []},
+        {"model": "eleven_v3", "measured": {"eleven_v3": 5, "eleven_v4": None}},
+    ],
+)
+def test_a_render_over_numbers_it_cannot_use_records_only_its_own(
+    series, tmp_path, beep, previous
+):
+    path = episode_dir(series, 1) / "render.json"
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    assert r.credit_rate(series, "eleven_v3") is None
+    result = run(series, tmp_path, FakeTTS(beep), balance=readings(9000, 8560)[1])
+    assert marker(series)["measured"] == {
+        "eleven_v3": {"chars_sent": result.billed, "credits_used": 440}
+    }
+
+
+def test_a_failed_render_moves_an_older_files_numbers_too(series, tmp_path, beep):
+    _three_pieces(series)
+    path = episode_dir(series, 1) / "render.json"
+    path.write_text(json.dumps(OLD), encoding="utf-8")
+    paid = fails(series, tmp_path, FakeTTS(beep, fail_at=1), 9000, 8900)
+    assert marker(series) == {
+        "model": "eleven_v3",
+        "voice": "voice-1",
+        "measured": {
+            "eleven_v3": {"chars_sent": 1000 + paid, "credits_used": 540},
+            "eleven_multilingual_v2": {"chars_sent": 10, "credits_used": 10},
+        },
+    }
+    assert r.credit_rate(series, "eleven_v3") == pytest.approx(540 / (1000 + paid))
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "garbage",
+        ["eleven_v3"],
+        {"eleven_v3": "x"},
+        {"eleven_v3": {"chars_sent": 9}},
+        {"eleven_v3": {"chars_sent": True, "credits_used": 1}},
+        {"eleven_v3": {"chars_sent": 9, "credits_used": -9}},
+        {"eleven_v3": {"chars_sent": 0, "credits_used": 5}},
+    ],
+)
+def test_credit_rate_ignores_a_broken_measured_entry(tmp_path, broken):
+    def mark(n, data):
+        folder = tmp_path / "episodes" / f"{n:02d}"
+        folder.mkdir(parents=True)
+        (folder / "render.json").write_text(json.dumps(data), encoding="utf-8")
+
+    mark(1, {"model": "eleven_v3", "measured": broken})
+    assert r.credit_rate(tmp_path, "eleven_v3") is None
+    good = {"chars_sent": 1000, "credits_used": 440}
+    mark(2, {"measured": {"eleven_v3": good, "eleven_v4": "x"}})
+    mark(3, ["not", "a", "render.json"])
+    assert r.credit_rate(tmp_path, "eleven_v3") == pytest.approx(0.44)
+    assert r.credit_rate(tmp_path, "eleven_v4") is None
 
 
 def _first_piece(series, tmp_path):

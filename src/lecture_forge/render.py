@@ -38,7 +38,7 @@ MAX_PREVIOUS = 3  # ElevenLabs accepts at most 3 previous_request_ids
 ID_TTL_S = 2 * 3600  # request ids can be stitched to for 2 hours
 SEED = 1729  # one fixed seed for every piece: steadier delivery across joins
 OUTPUT_FORMAT = "mp3_44100_128"
-MEASURED = ("chars_sent", "credits_used")  # render.json keys: what a render cost
+MEASURED = ("chars_sent", "credits_used")  # render.json: what a model's renders cost
 RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
             *(f"LPT{i}" for i in range(1, 10))}  # fmt: skip
 
@@ -259,14 +259,35 @@ def _target(
     return script, out, state, previous, up_to_date
 
 
-def _measured(marker, model: str) -> tuple[int, int]:
-    """(characters sent, credits used) of `model` recorded in a render.json, or in its
-    "unfinished" part; (0, 0) if none."""
-    if not isinstance(marker, dict) or marker.get("model") != model:
-        return 0, 0
-    vals = [marker.get(k) for k in MEASURED]
-    ok = all(type(v) is int and v > 0 for v in vals)
-    return (vals[0], vals[1]) if ok else (0, 0)
+def _measurements(marker) -> dict[str, tuple[int, int]]:
+    """(characters sent, credits used) per model, from what a render.json holds: its
+    "measured" part and the two places older files use, the top level (the finished
+    render's model) and "unfinished". Anything that isn't two counts above zero is left out."""
+    if not isinstance(marker, dict):
+        return {}
+    measured = marker.get("measured")
+    parts = list(measured.items()) if isinstance(measured, dict) else []
+    for old in (marker, marker.get("unfinished")):
+        if isinstance(old, dict):
+            parts.append((old.get("model"), old))
+    found: dict[str, tuple[int, int]] = {}
+    for model, part in parts:
+        vals = [part.get(k) for k in MEASURED] if isinstance(part, dict) else [None]
+        if isinstance(model, str) and all(type(v) is int and v > 0 for v in vals):
+            chars, credits = found.get(model, (0, 0))
+            found[model] = (chars + vals[0], credits + vals[1])
+    return found
+
+
+def _with_measurements(state: dict, measured: dict[str, tuple[int, int]]) -> dict:
+    """`state` holding these measurements, in "measured" only: left in an older file's
+    place as well, a sample would be counted twice."""
+    kept = {k: v for k, v in state.items() if k not in (*MEASURED, "unfinished")}
+    if measured:
+        kept["measured"] = {
+            m: dict(zip(MEASURED, pair)) for m, pair in measured.items()
+        }
+    return kept
 
 
 def credit_rate(series_dir: Path, model: str) -> float | None:
@@ -278,9 +299,8 @@ def credit_rate(series_dir: Path, model: str) -> float | None:
             m = json.loads(marker.read_text(encoding="utf-8"))
         except ValueError:  # torn: _target warns when that episode renders
             continue
-        for part in (m, m.get("unfinished")) if isinstance(m, dict) else ():
-            c, k = _measured(part, model)
-            chars, credits = chars + c, credits + k
+        c, k = _measurements(m).get(model, (0, 0))
+        chars, credits = chars + c, credits + k
     return credits / chars if chars > 0 else None
 
 
@@ -503,22 +523,21 @@ def render_episode(
         after = balance() if balance and billed else None
         # Counts can lag, or be topped up mid-render: only a drop is a cost.
         credits = before - after if before is not None and after is not None else 0
-        sent, used = _measured(previous.get("unfinished"), state["model"])
+        # Added to the episode's earlier measurement of this model: a small edit's sample
+        # mustn't replace a whole episode's. The other models' are kept as they are.
+        measured = _measurements(previous)
         if credits > 0:
-            sent, used = sent + billed, used + credits
+            sent, used = measured.get(state["model"], (0, 0))
+            measured[state["model"]] = (sent + billed, used + credits)
             # Saved before the join, beside what the up-to-date check reads: a render
             # that fails from here on has still measured the rate.
-            unfinished = {"model": state["model"]} | dict(zip(MEASURED, (sent, used)))
-            kept = json.dumps(previous | {"unfinished": unfinished}, indent=2)
+            kept = json.dumps(_with_measurements(previous, measured), indent=2)
             try:
                 save(marker, kept)
             except OSError as e:  # never in place of the error that stopped the render
                 log.warning("couldn't save the measured credits: %s", e)
-    # Add to the episode's earlier measurement of this model: a small edit's sample
-    # mustn't replace a whole episode's, and a rebuild that sends nothing keeps it.
-    done = _measured(previous, state["model"])
-    if done[1] + used:
-        state |= dict(zip(MEASURED, (done[0] + sent, done[1] + used)))
+    # A rebuild that sends nothing keeps them, and so does a render in another model.
+    state = _with_measurements(state, measured)
     artist = plan["author"] or "lecture-forge"
     on_progress(Progress("join", episode=ep["n"]))
     _join(files, out, {
