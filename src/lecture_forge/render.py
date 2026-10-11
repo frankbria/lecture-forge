@@ -339,9 +339,11 @@ def require_ffmpeg() -> None:
         raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
 
 
-# Files that passed _playable: (path, size, modification time in ns). In memory only.
+# Files that passed _playable: (path, size, modification time in ns). In memory, for as
+# long as the program runs: one command of the CLI, a GUI until it is closed.
 # shortcut: damage that changes neither a file's size nor its time isn't seen until the
-# next run; check the content (a hash kept beside each piece) if that ever happens.
+# program is started again; check the content (a hash kept beside each piece) if that
+# ever happens.
 _passed: set[tuple[str, int, int]] = set()
 
 
@@ -512,7 +514,9 @@ def render_episode(
     try:
         for k, (text, key) in enumerate(pieces, 1):
             mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
-            cached = _playable(mp3)  # checked once: the event and the work agree
+            check = Progress("check", k, len(pieces), episode=ep["n"])
+            # checked once: the event and the work agree
+            cached = _playable(mp3, partial(on_progress, check))
             note = "reused" if cached else "synthesizing"
             on_progress(Progress("piece", k, len(pieces), note, episode=ep["n"]))
             if cached:

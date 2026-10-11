@@ -1407,11 +1407,22 @@ def test_a_piece_changed_after_the_preview_is_checked_again(
     decodes.clear()
     tts = FakeTTS(beep)
     result = run(series, tmp_path, tts)
-    assert (
-        decodes[0] == bad and good not in decodes
-    )  # only the changed one, before reuse
+    # Only the changed piece is decoded, before anything is reused or paid for.
+    assert decodes[0] == bad and good not in decodes
     assert [t for t, _ in tts.calls] == [_pieces(series, tmp_path)[1][0]]  # paid again
     assert Path(bad).read_bytes() == beep and result.reused == 1
+
+
+def test_a_pass_is_remembered_for_that_file_only(tmp_path, beep):
+    """Another file of the same name, size and time, in another folder, is still checked:
+    the same text in two episodes gives two pieces with one file name."""
+    good, other = tmp_path / "01" / "piece.mp3", tmp_path / "02" / "piece.mp3"
+    good.parent.mkdir()
+    other.parent.mkdir()
+    good.write_bytes(beep)
+    other.write_bytes(b"<html>502</html>".ljust(len(beep)))
+    os.utime(other, ns=(good.stat().st_atime_ns, good.stat().st_mtime_ns))
+    assert r._playable(good) and not r._playable(other)
 
 
 def test_a_failed_check_is_not_remembered(series, tmp_path, beep, decodes):
@@ -1437,11 +1448,24 @@ def test_the_preview_reports_each_decode_and_none_it_can_skip(
         Progress("check", 2, 2, episode=1),
     ]
     r.preflight(plan, series, s, episode=1, force=False, on_progress=again.append)
-    assert (
-        again == []
-    )  # remembered: nothing is decoded, so there is nothing to wait for
+    assert again == []  # remembered: nothing is decoded, nothing to wait for
     r.preflight(plan, series, s, episode=2, force=False, on_progress=fresh.append)
     assert fresh == []  # nothing cached yet
+
+
+def test_a_render_reports_the_decodes_the_preview_did_not_do(series, tmp_path, beep):
+    from lecture_forge.progress import Progress
+
+    _cached_episode(series, tmp_path, beep)
+    events = []
+    run(series, tmp_path, FakeTTS(beep), on_progress=events.append)  # no preview first
+    assert [(e.stage, e.done, e.note) for e in events[:4]] == [
+        ("check", 1, ""), ("piece", 1, "reused"), ("check", 2, ""), ("piece", 2, "reused")
+    ]  # fmt: skip
+    assert events[0] == Progress("check", 1, 2, episode=1)
+    again = []
+    run(series, tmp_path, FakeTTS(beep), force=True, on_progress=again.append)
+    assert "check" not in [e.stage for e in again]  # remembered
 
 
 def test_render_says_it_is_checking_cached_pieces_before_the_cost(project, capsys):
