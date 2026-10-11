@@ -310,9 +310,10 @@ def _playable(mp3: Path) -> bool:
     """Whether the file is there and ffmpeg decodes all of it as MP3 audio.
 
     An error page saved as audio, or a file damaged on disk, fails to decode: ffmpeg logs
-    an error, and before version 7 still exits 0. A file cut to under about 15/16 of the
-    size its own header records decodes without one: ffmpeg only warns that the size is
-    off. A smaller cut is a valid MP3 and passes."""
+    an error, and exits 0 all the same when the damage is past the start of the file (seen
+    on 6.1.1 and 8.0.1). A file cut to under about 15/16 of the size its own header records
+    decodes without one: ffmpeg only warns that the size is off. A smaller cut is a valid
+    MP3 and passes."""
     if not mp3.exists():
         return False
     if shutil.which("ffmpeg") is None:  # can't tell, and nothing renders without ffmpeg
