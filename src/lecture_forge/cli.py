@@ -17,6 +17,7 @@ from lecture_forge.plan import (
     series_dir,
     write_plan,
 )
+from lecture_forge.progress import Progress
 from lecture_forge.providers import ProviderError, complete_switching
 from lecture_forge.source import (
     Source,
@@ -284,9 +285,17 @@ def cmd_render(args: argparse.Namespace) -> None:
     settings = load_settings(root=ROOT)
     settings.require("elevenlabs_api_key")
     settings.require("voice_id")
+    checking = set()
+
+    # A decode per cached piece takes about a second: say so, once per episode.
+    def show(event: Progress) -> None:
+        if event.episode not in checking:
+            checking.add(event.episode)
+            print(f"Checking episode {event.episode}'s cached pieces...", flush=True)
+
     p = render.preflight(
-        plan, series_dir, settings, episode=args.episode, force=args.force
-    )
+        plan, series_dir, settings, episode=args.episode, force=args.force, on_progress=show
+    )  # fmt: skip
     for ep, chars, why in p.episodes:
         if chars is None:
             print(f"Episode {ep['n']}: {ep['title']}: {why}, skipping")

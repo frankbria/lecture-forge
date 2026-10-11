@@ -28,6 +28,12 @@ class BilledCallBlocked(AssertionError):
     pass
 
 
+@pytest.fixture(autouse=True)
+def _no_piece_remembered():
+    """render._playable remembers a piece that passed for as long as the process runs."""
+    render._passed.clear()
+
+
 def pytest_collection_modifyitems(config, items):
     if PAID_OPT_IN:
         return
