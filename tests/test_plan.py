@@ -511,7 +511,9 @@ def test_series_live_under_the_project_root(tmp_path):
 
     assert series_dir(tmp_path, "algebra-1") == tmp_path / "series" / "algebra-1"
     for bad in ("../etc", "Algebra", "a/b", ""):
-        with pytest.raises(ValueError, match="lowercase letters"):
+        with pytest.raises(
+            ValueError, match="^a series name must be lowercase letters"
+        ):
             series_dir(tmp_path, bad)
 
 
@@ -589,7 +591,9 @@ def test_reusable_plan_is_the_existing_plan_only_for_the_same_source(tmp_path, b
     assert plan["source"].path == book.path.resolve()
     other = tmp_path / "other.md"
     other.write_text("x\n")
-    with pytest.raises(PlanError, match="is a plan for .*use another --series for"):
+    with pytest.raises(
+        PlanError, match="is a plan for .*; use another series for .*other.md$"
+    ):
         reusable_plan(out, other, root=tmp_path)
     out.write_text(
         "episodes: [", encoding="utf-8"
@@ -608,7 +612,10 @@ def test_reusable_plan_must_hold_an_episode_in_the_part_asked_for(tmp_path, book
     for part in [(2, 4), (1, 2), (4, 6), (3, 3), (1, 6)]:  # the edges count
         assert reusable_plan(out, book.path, root=tmp_path, part=part) is not None
     for part in [(1, 1), (5, 6)]:
-        with pytest.raises(PlanError, match=f"no episode in pages {part[0]}-{part[1]}"):
+        with pytest.raises(
+            PlanError,
+            match=f"no episode in pages {part[0]}-{part[1]}; use another series for that part",
+        ):
             reusable_plan(out, book.path, root=tmp_path, part=part)
 
 

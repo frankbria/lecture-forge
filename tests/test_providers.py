@@ -457,7 +457,7 @@ def test_pdf_over_the_providers_limit_fails_before_upload(
         complete(name, "s", "u", pdf, settings=settings(**KEYS), sleep=pytest.fail)
     msg = str(info.value)
     assert why in msg and not info.value.retryable
-    assert "--range" in msg and "lecture-forge outline" in msg and "claude-code" in msg
+    assert "one chapter at a time (the outline lists" in msg and "claude-code" in msg
     assert "plan.yaml" in msg  # write: the episode's range comes from the plan
     assert " 1 pages" not in msg
 
@@ -631,7 +631,9 @@ def test_pdf_over_the_context_window_fails_before_the_request(
     msg = str(info.value)
     assert f"{count:,} input tokens" in msg and window in msg
     assert "64,000" in msg and not info.value.retryable
-    assert "--range" in msg and "plan.yaml" in msg and "claude-code" in msg
+    assert (
+        "one chapter at a time" in msg and "plan.yaml" in msg and "claude-code" in msg
+    )
     assert [path for path, _ in claude_api.seen] == ["/v1/messages/count_tokens"]
 
 
@@ -672,3 +674,21 @@ def test_a_failed_token_count_does_not_block_the_request(
 def test_a_text_request_is_not_counted(claude_api):
     assert complete("anthropic", "s", "u", settings=settings(**KEYS)) == "ok"
     assert [path for path, _ in claude_api.seen] == ["/v1/messages"]
+
+
+def test_cli_names_its_flags_when_a_pdf_is_too_large(tmp_path, no_upload, capsys):
+    pdf = big_pdf(tmp_path / "source.pdf", 601)
+    with pytest.raises(ProviderError) as info:
+        llm(
+            settings(provider="anthropic", **KEYS), "s", "u", pdf,
+            interactive=True, ask=lambda _: "n",
+        )  # fmt: skip
+    shown = capsys.readouterr().err
+    assert shown.startswith("error: anthropic: the PDF is too large (601 pages, ")
+    assert shown.endswith(
+        " pages. Use a smaller page range: plan one chapter at a time with --range "
+        "(lecture-forge outline lists the chapter pages), or split the episode in "
+        "plan.yaml. Or use the claude-code provider, which reads the pages as it goes\n"
+    )
+    assert str(info.value).startswith(shown[len("error: ") : shown.index(". Use")])
+    assert "--range" not in str(info.value) and "lecture-forge" not in str(info.value)

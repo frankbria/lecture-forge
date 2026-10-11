@@ -35,6 +35,27 @@ from lecture_forge.write import (
 # The CLI's project is the folder it runs in; the engine takes the root explicitly.
 ROOT = Path(".")
 
+# The engine's advice (errors.advised) in this front end's words: the flag or command that
+# does it.
+ADVICE = {
+    "replace_plan": "; pass --force to replace it",
+    "rewrite_episode": "; pass --force to rewrite it",
+    "other_series": "; use another --series for {what}",
+    "write_episode": " (lecture-forge write)",
+    "rewrite_stale": "; rewrite it: lecture-forge write {series} --episode {episode}",
+    "smaller_part": (
+        ". Use a smaller page range: plan one chapter at a time with --range "
+        "(lecture-forge outline lists the chapter pages), or split the episode in "
+        "plan.yaml. Or use the claude-code provider, which reads the pages as it goes"
+    ),
+}
+
+
+def _worded(e: Exception) -> str:
+    """An error's message, with the engine's advice said the CLI's way."""
+    advice = ADVICE.get(getattr(e, "fix", None))
+    return str(e) if advice is None else e.problem + advice.format(**e.details)
+
 
 def llm(
     settings: Settings,
@@ -49,7 +70,7 @@ def llm(
     the error and ask which provider to switch to."""
 
     def choose(e: ProviderError) -> str:
-        print(f"error: {e}", file=sys.stderr)
+        print(f"error: {_worded(e)}", file=sys.stderr)
         return ask(f"Switch provider? [{'/'.join(e.alternatives)}/n]: ").strip()
 
     return complete_switching(
@@ -120,6 +141,10 @@ def _part(args: argparse.Namespace, src: Source) -> tuple[int, int]:
 
 
 def _check_series(slug: str) -> Path:
+    if not SLUG.fullmatch(slug):  # the engine's rule, named by this front end's flag
+        raise ValueError(
+            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
+        )
     return series_dir(ROOT, slug)
 
 
@@ -415,6 +440,6 @@ def main(argv: list[str] | None = None) -> int:
         OSError, ValueError,  # OSError: also a Dropbox-locked file, a full disk
         ConfigError, StyleGuideError, ProviderError, PlanError, WriteError, render.RenderError,
     ) as e:  # fmt: skip
-        print(f"error: {e}", file=sys.stderr)
+        print(f"error: {_worded(e)}", file=sys.stderr)
         return 1
     return 0

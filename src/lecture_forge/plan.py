@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from lecture_forge.errors import advised
 from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.source import (
     Source,
@@ -187,7 +188,7 @@ def series_dir(root: str | Path, slug: str) -> Path:
     """Where a series lives in the project at `root`; the slug becomes a folder name."""
     if not SLUG.fullmatch(slug):
         raise ValueError(
-            f"--series must be lowercase letters, digits, - or _, got {slug!r}"
+            f"a series name must be lowercase letters, digits, - or _, got {slug!r}"
         )
     return Path(root) / "series" / slug
 
@@ -220,8 +221,10 @@ def write_plan(
     """Write plan.yaml. `continues` names the series whose last episode this one's first
     episode recaps."""
     if path.exists() and not force:
-        raise FileExistsError(
-            f"{path} exists and may hold your edits; pass --force to replace it"
+        raise advised(
+            FileExistsError(f"{path} exists and may hold your edits"),
+            "; replacing it has to be asked for",
+            "replace_plan",
         )
     unit = "pages" if src.kind == "pdf" else "lines"
     data = {
@@ -351,14 +354,19 @@ def reusable_plan(
     plan = load_plan(path, root=root)
     planned = plan["source"].path.resolve()
     if planned != (Path(root) / source).resolve():
-        raise PlanError(
-            f"{path} is a plan for {planned}; use another --series for {source}"
+        raise advised(
+            PlanError(f"{path} is a plan for {planned}"),
+            "; use another series for {what}",
+            "other_series",
+            what=source,
         )
     if part and not any(
         e["start"] <= part[1] and part[0] <= e["end"] for e in plan["episodes"]
     ):
-        raise PlanError(
-            f"{path} has no episode in {plan['unit']} {part[0]}-{part[1]}; use another "
-            "--series for that part of the source"
+        raise advised(
+            PlanError(f"{path} has no episode in {plan['unit']} {part[0]}-{part[1]}"),
+            "; use another series for {what}",
+            "other_series",
+            what="that part of the source",
         )
     return plan
