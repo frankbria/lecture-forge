@@ -257,7 +257,45 @@ def _target(
     if size == 0 and warn:  # what a power cut can leave of a finished render
         log.warning("%s is empty; rendering it again", out)
     up_to_date = bool(size) and {k: previous.get(k) for k in state} == state
+    if up_to_date and (short := _missing(out)):  # read only when it would be skipped
+        up_to_date = False
+        if warn:
+            log.warning(
+                "%s is %s bytes short of what its header says; rendering it again",
+                out, f"{short:,}",
+            )  # fmt: skip
     return script, out, state, previous, up_to_date
+
+
+def _missing(mp3: Path) -> int:
+    """How many bytes short the file is of what its own header says: 0 when it is whole,
+    longer (a tag added at the end), or says nothing.
+
+    ffmpeg writing to a file, and ElevenLabs, record the audio's byte count in the first
+    frame (the Info or Xing tag), after any ID3v2 tag: size = tag + count, exactly, for
+    the 4 joined episodes and the 20 cached pieces checked on 2026-10-11. One small read
+    (about 25 ms on the Dropbox drive the first time), no decode."""
+    try:
+        with open(mp3, "rb") as f:
+            head = f.read(10)
+            tag = 0
+            if head[:3] == b"ID3" and len(head) == 10:
+                # ID3v2: ten bytes, the last four the size of what follows, 7 bits each
+                tag = 10 + (head[6] << 21 | head[7] << 14 | head[8] << 7 | head[9])
+            f.seek(tag)
+            frame = f.read(64)
+            size = os.fstat(f.fileno()).st_size
+    except OSError:  # missing, or locked by Dropbox: nothing to compare
+        return 0
+    # The tag follows the frame's header and side info: MPEG 2 or 1, mono or stereo.
+    for at in (13, 21, 36):
+        if frame[at : at + 4] in (b"Info", b"Xing") and len(frame) >= at + 16:
+            flags = frame[at + 7]
+            if flags & 2:  # a byte count is there, after the frame count if that is too
+                start = at + 8 + 4 * (flags & 1)
+                count = int.from_bytes(frame[start : start + 4], "big")
+                return max(0, tag + count - size)
+    return 0
 
 
 def _measurements(marker) -> dict[str, tuple[int, int]]:

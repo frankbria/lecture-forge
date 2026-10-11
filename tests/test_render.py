@@ -1484,3 +1484,81 @@ def test_render_says_it_is_checking_cached_pieces_before_the_cost(project, capsy
     )  # the episode, not a piece
     assert lines[1].startswith("Episode 2: ") and "0 characters" in lines[1]
     assert lines.count(lines[0]) == 1  # once for the episode, not once for each piece
+
+
+# --- an episode cut short (#89) ----------------------------------------------------------
+
+
+def test_an_mp3_says_how_many_bytes_it_should_have(tmp_path, beep):
+    def missing(data):
+        (tmp_path / "x.mp3").write_bytes(data)
+        return r._missing(tmp_path / "x.mp3")
+
+    half = len(beep) // 2
+    assert missing(beep) == 0
+    assert missing(beep[:-1]) == 1 and missing(beep[:half]) == len(beep) - half
+    assert missing(beep + b"TAG" + bytes(125)) == 0  # a tag added at the end is no cut
+    assert (
+        missing(b"") == 0 and missing(b"<html>502</html>") == 0
+    )  # no count to compare
+    assert (
+        missing(b"ID3\x04\x00\x00\x7f\x7f\x7f\x7f") == 0
+    )  # a tag longer than the file
+    assert missing(beep[:40]) == 0  # cut before the count itself
+    assert r._missing(tmp_path / "gone.mp3") == 0
+
+
+def test_an_episode_cut_short_is_not_already_rendered(series, tmp_path, beep, caplog):
+    """Part of the file is missing (damage on disk or in sync) beside a valid render.json:
+    200 bytes, far less than a decode would notice."""
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    size = out.stat().st_size
+    out.write_bytes(out.read_bytes()[:-200])
+    plan = load_plan(series / "plan.yaml")
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == 0
+    assert not caplog.messages  # the cost preview rebuilds nothing, so it says nothing
+    again = FakeTTS(beep)
+    result = run(series, tmp_path, again)
+    assert not result.skipped and again.calls == [] and result.reused == 2
+    assert out.stat().st_size == size  # rebuilt from the cached pieces
+    said = f"{out} is 200 bytes short of what its header says; rendering it again"
+    assert caplog.messages == [said]
+    assert run(series, tmp_path, FakeTTS(beep)).skipped
+
+
+def test_an_episode_cut_short_without_its_pieces_is_priced_before_it_is_paid_for(
+    series, tmp_path, beep
+):
+    first = FakeTTS(beep)
+    out = run(series, tmp_path, first).path
+    out.write_bytes(out.read_bytes()[:-200])
+    for f in (episode_dir(series, 1) / "audio").iterdir():
+        f.unlink()
+    plan = load_plan(series / "plan.yaml")
+    # The preview and the render decide alike, or the render would pay without a yes.
+    sent = sum(len(text) for text, _ in first.calls)
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == sent
+    assert run(series, tmp_path, FakeTTS(beep)).billed == sent
+
+
+@pytest.mark.parametrize("how", ["a tag added at the end", "written to a pipe"])
+def test_an_episode_no_shorter_than_it_says_still_counts(series, tmp_path, beep, how):
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    if how == "a tag added at the end":  # another program's ID3v1 tag
+        out.write_bytes(out.read_bytes() + b"TAG" + bytes(125))
+    else:  # ffmpeg can't go back to fill in the count: nothing to compare the size with
+        copy = [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-i",
+            str(out),
+            "-c",
+            "copy",
+            "-f",
+            "mp3",
+            "-",
+        ]
+        out.write_bytes(subprocess.run(copy, capture_output=True, check=True).stdout)
+    calls, balance = readings()
+    assert run(series, tmp_path, FakeTTS(beep), balance=balance).skipped and calls == []
