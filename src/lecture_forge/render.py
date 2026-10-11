@@ -286,13 +286,46 @@ def cost(
         return 0
     audio = episode_dir(series_dir, ep["n"]) / "audio"
     pieces = _keyed(settings, split_text(script, char_limit(settings.model_id)))
-    return sum(len(t) for t, k in pieces if not (audio / f"{k}.mp3").exists())
+    chars = 0
+    for k, (text, key) in enumerate(pieces, 1):
+        mp3 = audio / f"{key}.mp3"
+        if _playable(mp3):
+            continue
+        if mp3.exists():  # said here, before the yes: render_episode replaces it
+            log.warning(
+                "episode %s: cached piece %s of %s isn't playable audio; rendering pays "
+                "for it again (%s characters)", ep["n"], k, len(pieces), f"{len(text):,}",
+            )  # fmt: skip
+        chars += len(text)
+    return chars
 
 
 def require_ffmpeg() -> None:
     """A machine without ffmpeg can't finish an episode, so nothing may be spent on one."""
     if shutil.which("ffmpeg") is None:
         raise RenderError("ffmpeg is not installed; it joins the pieces into one MP3")
+
+
+def _playable(mp3: Path) -> bool:
+    """Whether the file is there and ffmpeg decodes all of it as MP3 audio.
+
+    An error page saved as audio, or a file damaged on disk, fails to decode: ffmpeg logs
+    an error, and exits 0 all the same when the damage is past the start of the file (seen
+    on 6.1.1 and 8.0.1). A file cut to under about 15/16 of the size its own header records
+    decodes without one: ffmpeg only warns that the size is off. A smaller cut is a valid
+    MP3 and passes."""
+    if not mp3.exists():
+        return False
+    if shutil.which("ffmpeg") is None:  # can't tell, and nothing renders without ffmpeg
+        return True
+    # -nostdin: or ffmpeg takes the keys typed ahead of a front end's question.
+    # -f mp3: other audio decodes too, and the join copies MP3 frames only.
+    proc = subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "level+warning", "-f", "mp3",
+         "-i", str(mp3.resolve()), "-f", "null", "-"], capture_output=True, check=False,
+    )  # fmt: skip
+    bad = (b"[error]", b"do not match")  # "filesize and duration do not match"
+    return proc.returncode == 0 and not any(sign in proc.stderr for sign in bad)
 
 
 @dataclass(frozen=True)
@@ -417,7 +450,7 @@ def render_episode(
     try:
         for k, (text, key) in enumerate(pieces, 1):
             mp3, rid = audio_dir / f"{key}.mp3", audio_dir / f"{key}.rid"
-            cached = mp3.exists()  # checked once: the event and the work agree
+            cached = _playable(mp3)  # checked once: the event and the work agree
             note = "reused" if cached else "synthesizing"
             on_progress(Progress("piece", k, len(pieces), note, episode=ep["n"]))
             if cached:
@@ -429,7 +462,17 @@ def render_episode(
                 audio, request_id = tts(text, context)
                 billed += len(text)  # paid for, even if caching it fails below
                 part = mp3.with_suffix(".part")
-                part.write_bytes(audio)
+                with open(part, "wb") as f:
+                    f.write(audio)
+                    f.flush()
+                    os.fsync(f.fileno())  # or a power cut can cache a piece cut short
+                if not _playable(part):  # e.g. an error page: never cached
+                    part.unlink()
+                    raise RenderError(
+                        f"episode {ep['n']}: what ElevenLabs sent for piece {k} of "
+                        f"{len(pieces)} isn't playable audio. It wasn't cached, so "
+                        "rendering again pays for that piece again"
+                    )
                 save(rid, request_id)
                 os.replace(part, mp3)  # a piece is cached only once it is fully on disk
             fresh = rid.exists() and time.time() - rid.stat().st_mtime < ID_TTL_S
