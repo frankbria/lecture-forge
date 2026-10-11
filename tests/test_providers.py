@@ -665,7 +665,8 @@ def test_a_failed_token_count_does_not_block_the_request(
     s = settings(**KEYS)
     assert complete("anthropic", "s", "u", pdf, settings=s, sleep=pytest.fail) == "ok"
     assert [path for path, _ in claude_api.seen][-1] == "/v1/messages"
-    assert "couldn't count" in caplog.text and "sending it anyway" in caplog.text
+    assert "couldn't count the tokens (" in caplog.text
+    assert "Error: " in caplog.text and "sending it anyway" in caplog.text
 
 
 def test_a_text_request_is_not_counted(claude_api):

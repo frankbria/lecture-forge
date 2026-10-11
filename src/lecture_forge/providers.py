@@ -111,7 +111,10 @@ def check_context(
         over = tokens + MAX_TOKENS > window
     # besides API errors: a 200 reply that isn't a count (a proxy's page, a cut-off body)
     except (anthropic.APIError, ValueError, TypeError, AttributeError) as e:
-        log.warning("anthropic: couldn't count the tokens (%r); sending it anyway", e)
+        log.warning(
+            "anthropic: couldn't count the tokens (%s: %s); sending it anyway",
+            type(e).__name__, e,
+        )  # fmt: skip
         return
     if over:
         raise _too_large(
