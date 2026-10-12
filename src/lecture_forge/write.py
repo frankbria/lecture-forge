@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lecture_forge.errors import advised
-from lecture_forge.plan import Call, load_plan, save
+from lecture_forge.plan import Call, PlanError, load_plan, save
 from lecture_forge.progress import OnProgress, Progress, ignore
 from lecture_forge.source import extract_text, slice_pdf
 from lecture_forge.style_guide import StyleGuide
@@ -280,17 +280,25 @@ def _split_suggestion(notes: str) -> str:
     return ""
 
 
-def _recap(episode: Path) -> tuple[str, str]:
-    summary, puzzle = (
-        (episode / f).read_text(encoding="utf-8").strip()
-        for f in ("summary.md", "puzzle_answer.md")
-    )
+def _recap(series_dir: Path, n: int) -> tuple[str, str]:
+    """(summary, puzzle and answer) of written episode n. Both files are saved before its
+    script.txt, so one that is missing was lost since."""
+    files = [episode_dir(series_dir, n) / f for f in ("summary.md", "puzzle_answer.md")]
+    if lost := [f.name for f in files if not f.is_file()]:
+        series = Path(series_dir).name
+        problem = (
+            f"episode {n} of series {series} has a script but no {' and '.join(lost)}"
+        )
+        raise advised(WriteError(problem), "; rewrite it", "rewrite_recap", series=series, episode=n)  # fmt: skip
+    summary, puzzle = (f.read_text(encoding="utf-8").strip() for f in files)
     return summary, puzzle
 
 
-def _continued(slug: str, series_dir: Path) -> tuple[str, str]:
+def continued_recap(slug: str, series_dir: Path) -> tuple[str, str]:
     """(summary, puzzle and answer) of the last episode of series `slug`, which the first
-    episode of the series at series_dir continues from. It must be written."""
+    episode of the series at series_dir continues from. It must be written: a WriteError
+    says what is still to do, a PlanError that the other series' plan doesn't load. A front
+    end can ask before planning, when an unwritten episode is only something to say."""
     other = Path(series_dir).parent / slug
     if not (other / "plan.yaml").is_file():
         raise WriteError(
@@ -303,7 +311,7 @@ def _continued(slug: str, series_dir: Path) -> tuple[str, str]:
         raise WriteError(
             f"series {slug} (continued from) has no finished last episode; write it first"
         )
-    summary, puzzle = _recap(episode_dir(other, last[0]["n"]))
+    summary, puzzle = _recap(other, last[0]["n"])
     return f"(From the previous series, {theirs['title']}.) {summary}", puzzle
 
 
@@ -312,7 +320,7 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
     A first episode has none, unless its series continues another one."""
     earlier = [e for e in plan["episodes"] if e["n"] < ep["n"]]
     if not earlier:
-        return _continued(plan["continues"], series_dir) if plan["continues"] else None
+        return continued_recap(plan["continues"], series_dir) if plan["continues"] else None  # fmt: skip
     n = earlier[-1]["n"]
     state = script_state(series_dir, plan, earlier[-1])
     if state == "missing":
@@ -323,7 +331,7 @@ def _previous(plan: dict, ep: dict, series_dir: Path) -> tuple[str, str] | None:
         raise WriteError(
             f"rewrite episode {n} first: its script no longer matches the plan"
         )
-    return _recap(episode_dir(series_dir, n))
+    return _recap(series_dir, n)
 
 
 def episodes_to_write(
@@ -373,6 +381,32 @@ def on_old_recap(
         if ep["n"] < e["n"] < stop
     )
     return [(n, state) for n, state in later if state != "missing"]
+
+
+def series_on_old_recap(
+    plan: dict, series_dir: Path, todo: list[tuple[dict, str, str]], ep: dict
+) -> list[tuple[str, int, str]]:
+    """The series left on an old summary and puzzle when this run (todo) writes ep, the last
+    episode of the series at series_dir: those whose plan says they continue it and whose
+    first episode is written, each as (series, that episode's number, "current" or "stale").
+    As in on_old_recap, a first write of ep counts, and nothing is rewritten. A plan next
+    door that doesn't load is passed over: nothing can be written from it either."""
+    here = Path(series_dir)
+    wrote = any(e["n"] == ep["n"] and action != "skip" for e, action, _ in todo)
+    if not wrote or ep["n"] != plan["episodes"][-1]["n"]:
+        return []
+    found = []
+    for path in sorted(here.parent.glob("*/plan.yaml")):
+        try:
+            theirs = load_plan(path, root=here.parent.parent)
+        except PlanError:
+            continue
+        if theirs["continues"] == here.name and theirs["episodes"]:
+            first = theirs["episodes"][0]
+            state = script_state(path.parent, theirs, first)
+            if state != "missing":
+                found.append((path.parent.name, first["n"], state))
+    return found
 
 
 def write_episode(

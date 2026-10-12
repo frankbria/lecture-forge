@@ -208,3 +208,66 @@ def test_run_refuses_a_plan_that_does_not_continue_what_the_flag_says(project, c
     assert main(args) == 1
     assert "plan.yaml doesn't say `continues: ch3`" in capsys.readouterr().err
     assert len(llm) == 2 and not (root / "series/ch4/episodes").exists()
+
+
+# --- a continued series: notes at plan time and after a rewrite (#93) ---------------------
+
+NOT_YET = (
+    "note: series ch3 (continued from) has no finished last episode; write it first. "
+    "Until then the first episode of ch4 can't be written.\n"
+)
+
+
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_continuing_a_series_that_is_not_written_yet_is_a_note_and_still_plans(
+    project, capsys, command
+):
+    """Planning chapter 4 before chapter 3 is finished is a normal order of work."""
+    root, notes, llm, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    capsys.readouterr()
+    assert main([command, str(notes), "--series", "ch4", "--continues", "ch3"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(NOT_YET) and out.count("note:") == 1
+    assert continues_of(root, "ch4") == "ch3" and len(llm) == 2
+
+
+def test_no_note_when_the_continued_series_is_written(project, capsys):
+    _, notes, _, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    main(["write", "ch3", "--all", "--auto"])
+    capsys.readouterr()
+    assert main(["plan", str(notes), "--series", "ch4", "--continues", "ch3"]) == 0
+    assert "note:" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["plan", "run"])
+def test_a_continued_series_whose_plan_does_not_load_stops_before_planning(
+    project, capsys, command
+):
+    root, notes, llm, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    (root / "series/ch3/plan.yaml").write_text("episodes: [", encoding="utf-8")
+    assert main([command, str(notes), "--series", "ch4", "--continues", "ch3"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ") and "series/ch3/plan.yaml" in captured.err
+    assert len(llm) == 1 and not (root / "series/ch4").exists()
+
+
+def test_rewriting_a_series_last_episode_names_the_series_that_continues_it(
+    project, capsys
+):
+    _, notes, _, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    main(["write", "ch3", "--all", "--auto"])
+    main(["plan", str(notes), "--series", "ch4", "--continues", "ch3"])
+    main(["write", "ch4", "--episode", "1", "--auto"])
+    capsys.readouterr()
+    assert main(["write", "ch3", "--episode", "1", "--force", "--auto"]) == 0
+    assert "series ch4" not in capsys.readouterr().out  # not ch3's last episode
+    assert main(["write", "ch3", "--episode", "2", "--force", "--auto"]) == 0
+    old = "is built on the old summary and puzzle"
+    assert (
+        f"  note: episode 1 of series ch4 {old}; rewrite it with --force if the recap "
+        "matters\n" in capsys.readouterr().out
+    )
