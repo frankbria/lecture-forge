@@ -216,17 +216,39 @@ def _text(value) -> str:
     return "" if value is None else str(value)
 
 
-def write_plan(
-    plan: dict, src: Source, path: Path, *, force: bool = False, continues: str = ""
-) -> Path:
-    """Write plan.yaml. `continues` names the series whose last episode this one's first
-    episode recaps."""
-    if path.exists() and not force:
+CONTINUES_RULE = (
+    "another series that has a plan.yaml"  # said of a front end's own field
+)
+
+
+def check_continues(root: str | Path, series: str, other: str) -> None:
+    """Refuse to plan `series` as continuing `other` unless `other` is another series, by a
+    valid name, that is planned. For a front end to ask before it spends a planning call."""
+    if (
+        other == series
+        or not SLUG.fullmatch(other)
+        or not (series_dir(root, other) / "plan.yaml").is_file()
+    ):
+        raise PlanError(f"a series can only continue {CONTINUES_RULE}, got {other!r}")
+
+
+def check_new_plan(path: Path, force: bool = False) -> None:
+    """Refuse to write a plan where there is one, unless forced: it may hold the owner's
+    edits. A front end asks before it spends a planning call; write_plan asks again."""
+    if Path(path).exists() and not force:
         raise advised(
             FileExistsError(f"{path} exists and may hold your edits"),
             "; it is replaced only if you ask for that",
             "replace_plan",
         )
+
+
+def write_plan(
+    plan: dict, src: Source, path: Path, *, force: bool = False, continues: str = ""
+) -> Path:
+    """Write plan.yaml. `continues` names the series whose last episode this one's first
+    episode recaps."""
+    check_new_plan(path, force)
     unit = "pages" if src.kind == "pdf" else "lines"
     data = {
         "title": _text(plan.get("title")) or src.path.stem,

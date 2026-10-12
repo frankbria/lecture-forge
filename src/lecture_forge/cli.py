@@ -7,10 +7,12 @@ from pathlib import Path
 from lecture_forge import render
 from lecture_forge.config import ConfigError, Settings, load_settings
 from lecture_forge.plan import (
+    CONTINUES_RULE,
     MAX_MINUTES,
-    SLUG,
     SLUG_RULE,
     PlanError,
+    check_continues,
+    check_new_plan,
     load_plan,
     make_plan,
     reusable_plan,
@@ -175,14 +177,12 @@ def _continues(args: argparse.Namespace) -> str:
     slug = args.continues
     if slug is None:
         return ""
-    if (
-        slug == args.series
-        or not SLUG.fullmatch(slug)
-        or not (series_dir(ROOT, slug) / "plan.yaml").is_file()
-    ):
+    try:
+        check_continues(ROOT, args.series, slug)
+    except PlanError:  # the engine's rule, said of this front end's flag
         raise ValueError(
-            f"--continues must name another series that has a plan.yaml, got {slug!r}"
-        )
+            f"--continues must name {CONTINUES_RULE}, got {slug!r}"
+        ) from None
     return slug
 
 
@@ -202,10 +202,7 @@ def _provider_call(settings: Settings, auto: bool):
 
 def cmd_plan(args: argparse.Namespace) -> None:
     out = _check_series(args.series) / "plan.yaml"
-    if out.exists() and not args.force:  # check before spending an LLM call
-        raise FileExistsError(
-            f"{out} exists and may hold your edits; pass --force to replace it"
-        )
+    check_new_plan(out, args.force)  # before spending an LLM call
     continues = _continues(args)
     if continues:
         try:  # their plan must load; a last episode not written yet is only worth saying
