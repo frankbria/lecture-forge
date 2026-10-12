@@ -41,7 +41,9 @@ def ignore(event: Progress) -> None:
 
 def tell(on_progress: OnProgress, text: str, episode: int = 0) -> None:
     """A note for the user: to the front end that listens, else to the log, so a script
-    that calls the engine with no callback still sees it."""
+    that calls the engine with no callback still sees it. Only the default, ,
+    counts as nobody listening: a callback of the front end's own is given the note, even
+    if it does nothing with it."""
     if on_progress is ignore:
         logging.getLogger(__name__).warning(text)
     else:
