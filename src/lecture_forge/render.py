@@ -229,7 +229,7 @@ def _script(series_dir: Path, plan: dict, ep: dict) -> str:
 
 def _target(
     plan: dict, ep: dict, series_dir: Path, settings: Settings,
-    *, on_progress: OnProgress | None = ignore,
+    *, on_progress: OnProgress | None,
 ):  # fmt: skip
     """(script, output MP3, render state, previous state, up to date) for one episode. What
     makes it render again is a note through on_progress; None says it to nobody."""

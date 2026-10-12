@@ -9,9 +9,11 @@ are cached first), so that is a safe way to cancel. Raising on "done" reports a 
 did finish as failed, so don't. Events arrive synchronously on the thread that called the
 engine: a GUI running the engine on a worker thread hands them to its UI thread itself.
 
-A "note" event is not a step: it is something to tell the user that isn't a failure (an
-episode file that is rendered again and why, a cached piece that has gone bad and what
-replacing it costs), in words any front end can show. With nobody listening it is logged.
+A "note" event is not a step: it is something to tell the user that isn't a failure, in
+words any front end can show. The cost preview notes a cached piece that has gone bad and
+what replacing it costs; the render notes why an episode file is rendered again. With
+nobody listening a note is logged. A retry of a network call is not an event: the two
+functions that retry (providers.complete, render.elevenlabs_tts) take `on_retry`.
 """
 
 import logging
@@ -21,14 +23,12 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Progress:
-    stage: (
-        str  # "plan", "draft", "critique", "check", "piece", "join", "done" or "note"
-    )
+    # "plan", "draft", "critique", "check", "piece", "join", "done" or "note"
+    stage: str
     done: int = 0  # "check" and "piece": the piece's number, from 1
     total: int = 0  # "check" and "piece": how many pieces the episode has
-    note: str = (
-        ""  # "repair round"; a piece: "synthesizing" or "reused"; a note: its text
-    )
+    # "repair round"; for a piece, "synthesizing" or "reused"; for a note, its text
+    note: str = ""
     episode: int = 0  # write and render: the episode's number; 0 for the plan
 
 

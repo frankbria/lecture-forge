@@ -1706,3 +1706,17 @@ def test_an_elevenlabs_retry_is_told_to_the_listener_or_logged(caplog):
     assert not caplog.messages
     assert tts()("hello", []) == (b"audio", "r1")
     assert caplog.messages == told  # nobody listening: logged, in the same words
+
+
+def test_render_prints_why_an_episode_is_rendered_again_itself(project, capsys, caplog):
+    """The CLI listens to the render: the note is its own line on stderr, not the log's."""
+    root, _ = project
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    out = next((root / "Lectures").rglob("01 - *.mp3"))
+    out.write_bytes(out.read_bytes()[:-200])
+    capsys.readouterr()
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    shown = capsys.readouterr()
+    said = f"{out} is 200 bytes short of what its header says; rendering it again\n"
+    assert shown.err == said and not caplog.messages
+    assert shown.out.count("Checking episode 1's cached pieces...") == 1
