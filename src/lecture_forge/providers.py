@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 DEFAULT_MODELS = {
     "claude-code": "",
     "anthropic": "claude-opus-5-5",
-    "openai": "gpt-5.5",
+    "openai": "gpt-6.1-sol",
 }
 TIMEOUT_S = 1800  # a full script plus critique can take many minutes
 MAX_TOKENS = 64000  # the reply's share of the context window
