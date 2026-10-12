@@ -1498,14 +1498,42 @@ def test_an_mp3_says_how_many_bytes_it_should_have(tmp_path, beep):
     assert missing(beep) == 0
     assert missing(beep[:-1]) == 1 and missing(beep[:half]) == len(beep) - half
     assert missing(beep + b"TAG" + bytes(125)) == 0  # a tag added at the end is no cut
-    assert (
-        missing(b"") == 0 and missing(b"<html>502</html>") == 0
-    )  # no count to compare
-    assert (
-        missing(b"ID3\x04\x00\x00\x7f\x7f\x7f\x7f") == 0
-    )  # a tag longer than the file
-    assert missing(beep[:40]) == 0  # cut before the count itself
-    assert r._missing(tmp_path / "gone.mp3") == 0
+    # No count to compare, and not even a whole ID3v2 header: they say nothing.
+    assert missing(b"") == 0 and missing(b"<html>502</html>") == 0
+    assert missing(b"ID3") == 0
+    at = beep.index(b"Info")
+    tag = at - 21  # the ID3v2 tag, then 21 bytes of the first frame
+    # Cut inside the ID3v2 tag, or inside the frame that holds the count: short by at
+    # least what is missing up to the end of the count.
+    assert missing(beep[:40]) == tag + 64 - 40
+    assert missing(beep[: at + 6]) == tag + 64 - (at + 6)
+    no_count = bytearray(beep[:-1])
+    no_count[at + 7] &= ~2  # the flag that says a byte count follows
+    assert missing(bytes(no_count)) == 0
+    assert r._missing(tmp_path / "gone.mp3") == 0 and r._missing(tmp_path) == 0
+
+
+ENCODINGS = {  # where the count sits depends on these: 21, 36 and 13 bytes into the frame
+    "mono": [],
+    "stereo": ["-ac", "2"],
+    "half the sample rate": ["-ar", "22050"],
+    "variable bit rate": ["-q:a", "5"],  # an Xing tag in place of Info
+    "an ID3v2.3 tag over 127 bytes": ["-id3v2_version", "3", "-metadata", "title=" + "T" * 200],
+    "no ID3v2 tag": ["-id3v2_version", "0"],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("encoding", ENCODINGS)
+def test_the_count_is_found_however_ffmpeg_encoded_the_mp3(tmp_path, encoding):
+    mp3 = tmp_path / "x.mp3"
+    tone = ["-f", "lavfi", "-i", "sine=frequency=440:duration=0.4"]
+    subprocess.run(
+        ["ffmpeg", "-loglevel", "error", *tone, *ENCODINGS[encoding], str(mp3)],
+        check=True,
+    )
+    assert r._missing(mp3) == 0
+    mp3.write_bytes(mp3.read_bytes()[:-7])
+    assert r._missing(mp3) == 7
 
 
 def test_an_episode_cut_short_is_not_already_rendered(series, tmp_path, beep, caplog):
@@ -1524,6 +1552,29 @@ def test_an_episode_cut_short_is_not_already_rendered(series, tmp_path, beep, ca
     said = f"{out} is 200 bytes short of what its header says; rendering it again"
     assert caplog.messages == [said]
     assert run(series, tmp_path, FakeTTS(beep)).skipped
+    caplog.clear()
+    out.write_bytes(
+        out.read_bytes()[:-200]
+    )  # cut again, and the script edited as well:
+    script = episode_dir(series, 1) / "script.txt"
+    script.write_text(
+        script.read_text(encoding="utf-8") + "\nMore.\n", encoding="utf-8"
+    )
+    assert not run(series, tmp_path, FakeTTS(beep)).skipped
+    assert (
+        not caplog.messages
+    )  # rendered for the edit; the cut file was never a candidate
+
+
+def test_an_episode_cut_down_to_its_first_bytes_is_not_already_rendered(
+    series, tmp_path, beep
+):
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    size = out.stat().st_size
+    out.write_bytes(out.read_bytes()[:100])  # it ends inside its ID3v2 tag
+    again = FakeTTS(beep)
+    assert not run(series, tmp_path, again).skipped and again.calls == []
+    assert out.stat().st_size == size
 
 
 def test_an_episode_cut_short_without_its_pieces_is_priced_before_it_is_paid_for(
