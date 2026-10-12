@@ -699,3 +699,42 @@ def test_cli_names_its_flags_when_a_pdf_is_too_large(tmp_path, no_upload, capsys
         "outline lists the chapter pages), or split the episode in plan.yaml. Or use the "
         "claude-code provider, which reads the pages as it goes"
     )
+
+
+# --- a retry in progress reaches a front end (#99) --------------------------------------
+
+
+def test_a_retry_is_told_to_the_listener_or_logged(fake, caplog):
+    def overloaded(n):
+        return [
+            ProviderError("fake", "529 overloaded", retryable=True) for _ in range(n)
+        ]
+
+    told = []
+    fake(overloaded(2))
+    kw = {"settings": settings(), "sleep": lambda _: None}
+    assert complete("fake", "s", "u", on_retry=told.append, **kw) == "ok:u"
+    assert told == [
+        "fake: 529 overloaded; retrying in 10s (1/3)",
+        "fake: 529 overloaded; retrying in 20s (2/3)",
+    ]
+    assert not caplog.messages
+    fake(overloaded(1))
+    assert complete("fake", "s", "u", **kw) == "ok:u"
+    assert caplog.messages == told[:1]  # nobody listening: logged, in the same words
+
+
+def test_complete_switching_hands_the_retry_listener_on(fake, monkeypatch):
+    seen, real = [], providers.complete
+
+    def recording(*args, **kw):
+        seen.append(kw.get("on_retry"))
+        return real(*args, **kw)
+
+    monkeypatch.setattr(providers, "complete", recording)
+    fake([])
+    told = []
+    s = settings(provider="fake")
+    assert providers.complete_switching(s, "s", "u", on_retry=told.append)[0] == "ok:u"
+    assert providers.complete_switching(s, "s", "u")[0] == "ok:u"
+    assert seen == [told.append, None]

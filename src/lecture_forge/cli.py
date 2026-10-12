@@ -301,9 +301,16 @@ def cmd_render(args: argparse.Namespace) -> None:
     settings.require("voice_id")
     checking = set()
 
-    # A decode per cached piece takes about a second: say so, once per episode.
+    # A note (why an episode is rendered again, a cached piece gone bad and what replacing
+    # it costs) is printed as it is.
+    def note(event: Progress) -> None:
+        if event.stage == "note":
+            print(event.note, file=sys.stderr)
+
+    # In the preview a decode per cached piece takes about a second: say so, once per episode.
     def show(event: Progress) -> None:
-        if event.episode not in checking:
+        note(event)
+        if event.stage == "check" and event.episode not in checking:
             checking.add(event.episode)
             print(f"Checking episode {event.episode}'s cached pieces...", flush=True)
 
@@ -343,7 +350,7 @@ def cmd_render(args: argparse.Namespace) -> None:
         print(f"Episode {ep['n']}: {ep['title']}: rendering...", flush=True)
         res = render.render_episode(
             plan, ep, series_dir, settings, tts, force=args.force,
-            balance=lambda: render.characters_left(settings),
+            balance=lambda: render.characters_left(settings), on_progress=note,
         )  # fmt: skip
         if res.skipped:
             print(f"  already rendered: {res.path}")

@@ -21,7 +21,7 @@ from elevenlabs.core.api_error import ApiError
 from lecture_forge.config import Settings
 from lecture_forge.errors import advised
 from lecture_forge.plan import save
-from lecture_forge.progress import OnProgress, Progress, ignore
+from lecture_forge.progress import OnProgress, Progress, ignore, tell
 from lecture_forge.providers import retryable_status
 from lecture_forge.write import episode_dir, script_state, stale_reason
 
@@ -156,8 +156,10 @@ def elevenlabs_tts(
     convert: Callable[..., tuple[bytes, str]] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     attempts: int = 4,
+    on_retry: Callable[[str], None] | None = None,
 ) -> TTS:
-    """ElevenLabs text-to-speech with the same retry policy as the LLM providers."""
+    """ElevenLabs text-to-speech with the same retry policy as the LLM providers. A retry
+    about to wait is told to `on_retry`, or logged when nobody listens."""
     voice = settings.require("voice_id")
     if convert is None:
         client = ElevenLabs(api_key=settings.require("elevenlabs_api_key"), timeout=300)
@@ -181,7 +183,7 @@ def elevenlabs_tts(
             if not retryable_status(status) or attempt == attempts - 1:
                 raise RenderError(f"ElevenLabs: {detail}") from err
             delay = 10 * 2**attempt
-            log.warning("ElevenLabs %s; retrying in %ss", detail, delay)
+            (on_retry or log.warning)(f"ElevenLabs {detail}; retrying in {delay}s")
             sleep(delay)
 
     return tts
@@ -226,9 +228,16 @@ def _script(series_dir: Path, plan: dict, ep: dict) -> str:
 
 
 def _target(
-    plan: dict, ep: dict, series_dir: Path, settings: Settings, *, warn: bool = True
-):
-    """(script, output MP3, render state, previous state, up to date) for one episode."""
+    plan: dict, ep: dict, series_dir: Path, settings: Settings,
+    *, on_progress: OnProgress | None,
+):  # fmt: skip
+    """(script, output MP3, render state, previous state, up to date) for one episode. What
+    makes it render again is a note through on_progress; None says it to nobody."""
+
+    def say(text: str) -> None:
+        if on_progress is not None:
+            tell(on_progress, text, ep["n"])
+
     script = _script(series_dir, plan, ep)
     out = (
         _album_path(settings, plan)
@@ -250,20 +259,17 @@ def _target(
         ):  # bad JSON or not UTF-8 (JSONDecodeError, UnicodeDecodeError)
             previous = None
         if not isinstance(previous, dict):  # torn by a crash, or hand-edited
-            if warn:
-                log.warning("%s is unreadable; rebuilding from cached pieces", marker)
+            say(f"{marker} is unreadable; rebuilding from cached pieces")
             previous = {}
     size = out.stat().st_size if out.exists() else None
-    if size == 0 and warn:  # what a power cut can leave of a finished render
-        log.warning("%s is empty; rendering it again", out)
+    if size == 0:  # what a power cut can leave of a finished render
+        say(f"{out} is empty; rendering it again")
     up_to_date = bool(size) and {k: previous.get(k) for k in state} == state
     if up_to_date and (short := _missing(out)):  # read only when it would be skipped
         up_to_date = False
-        if warn:
-            log.warning(
-                "%s is %s bytes short of what its header says; rendering it again",
-                out, f"{short:,}",
-            )  # fmt: skip
+        say(
+            f"{out} is {short:,} bytes short of what its header says; rendering it again"
+        )
     return script, out, state, previous, up_to_date
 
 
@@ -353,8 +359,8 @@ def cost(
     """Characters this episode would send to ElevenLabs now: 0 if it is already rendered
     (and not forced), else only the pieces not yet cached. Each cached piece it has to
     decode is reported first, as a "check" event."""
-    # warn=False: a preview rebuilds nothing, and render_episode warns when it does.
-    script, _, _, _, up_to_date = _target(plan, ep, series_dir, settings, warn=False)
+    # None: a preview rebuilds nothing, and render_episode says so when it does.
+    script, _, _, _, up_to_date = _target(plan, ep, series_dir, settings, on_progress=None)  # fmt: skip
     if up_to_date and not force:
         return 0
     audio = episode_dir(series_dir, ep["n"]) / "audio"
@@ -366,10 +372,8 @@ def cost(
         if _playable(mp3, partial(on_progress, check)):
             continue
         if mp3.exists():  # said here, before the yes: render_episode replaces it
-            log.warning(
-                "episode %s: cached piece %s of %s isn't playable audio; rendering pays "
-                "for it again (%s characters)", ep["n"], k, len(pieces), f"{len(text):,}",
-            )  # fmt: skip
+            bad = f"episode {ep['n']}: cached piece {k} of {len(pieces)} isn't playable audio"
+            tell(on_progress, f"{bad}; rendering pays for it again ({len(text):,} characters)", ep["n"])  # fmt: skip
         chars += len(text)
     return chars
 
@@ -538,7 +542,7 @@ def render_episode(
 ) -> Rendered:
     """`balance` reads the plan's credit balance; read before and after synthesis, the drop
     is recorded in render.json as what this episode cost, also when the render then fails."""
-    script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings)
+    script, out, state, previous, up_to_date = _target(plan, ep, series_dir, settings, on_progress=on_progress)  # fmt: skip
     if up_to_date and not force:
         return Rendered(out, 0, 0, True)
     require_ffmpeg()  # before any folder or paid request

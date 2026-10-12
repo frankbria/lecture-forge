@@ -1228,8 +1228,11 @@ def test_render_names_a_bad_cached_piece_before_asking_to_spend(
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     capsys.readouterr()
     assert main(["render", "algebra", "--episode", "1"]) == 1
-    assert "episode 1: cached piece 2 of 2 isn't playable audio" in caplog.text
-    assert f": {len(text):,} characters to synthesize" in capsys.readouterr().out
+    shown = capsys.readouterr()
+    said = "episode 1: cached piece 2 of 2 isn't playable audio; rendering pays for it"
+    assert shown.err.startswith(f"{said} again ({len(text):,} characters)\n")
+    assert not caplog.messages  # told to the CLI, which printed it: not logged as well
+    assert f": {len(text):,} characters to synthesize" in shown.out
     assert len(tts.calls) == paid  # nothing is spent without the yes
 
 
@@ -1619,3 +1622,101 @@ def test_an_episode_no_shorter_than_it_says_still_counts(series, tmp_path, beep,
         out.write_bytes(subprocess.run(copy, capture_output=True, check=True).stdout)
     calls, balance = readings()
     assert run(series, tmp_path, FakeTTS(beep), balance=balance).skipped and calls == []
+
+
+# --- notes reach a front end as events (#99) ---------------------------------------------
+
+
+def _note(text, episode=1):
+    from lecture_forge.progress import Progress
+
+    return Progress("note", note=text, episode=episode)
+
+
+def test_a_listener_gets_a_note_and_the_log_only_when_nobody_listens(caplog):
+    from lecture_forge.progress import ignore, tell
+
+    events = []
+    tell(events.append, "x is empty", 3)
+    assert events == [_note("x is empty", 3)] and not caplog.messages
+    tell(ignore, "x is empty", 3)
+    assert caplog.messages == ["x is empty"] and len(events) == 1
+
+
+@pytest.mark.parametrize(
+    "damage", ["an unreadable render.json", "an empty episode", "an episode cut short"]
+)
+def test_what_makes_an_episode_render_again_is_told_to_the_listener(
+    series, tmp_path, beep, caplog, damage
+):
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    marker = episode_dir(series, 1) / "render.json"
+    if damage == "an unreadable render.json":
+        marker.write_bytes(b"[]")
+        said = f"{marker} is unreadable; rebuilding from cached pieces"
+    elif damage == "an empty episode":
+        out.write_bytes(b"")
+        said = f"{out} is empty; rendering it again"
+    else:
+        out.write_bytes(out.read_bytes()[:-200])
+        said = f"{out} is 200 bytes short of what its header says; rendering it again"
+    plan = load_plan(series / "plan.yaml")
+    preview, events = [], []
+    r.cost(plan, plan["episodes"][0], series, settings(tmp_path), on_progress=preview.append)  # fmt: skip
+    assert "note" not in [e.stage for e in preview]  # the preview rebuilds nothing
+    run(series, tmp_path, FakeTTS(beep), on_progress=events.append)
+    assert events[0] == _note(said)  # before the pieces it is about
+    assert [e.stage for e in events].count("note") == 1 and not caplog.messages
+
+
+def test_a_bad_cached_piece_is_a_note_in_the_preview(series, tmp_path, beep, caplog):
+    run(series, tmp_path, FakeTTS(beep)).path.unlink()  # every piece cached, no episode
+    (_, _), (text, bad) = _pieces(series, tmp_path)
+    bad.write_bytes(b"<html>502</html>")
+    plan = load_plan(series / "plan.yaml")
+    events = []
+    s = settings(tmp_path)
+    assert r.cost(plan, plan["episodes"][0], series, s, on_progress=events.append) == len(text)  # fmt: skip
+    said = "episode 1: cached piece 2 of 2 isn't playable audio; rendering pays for it"
+    assert events[-1] == _note(f"{said} again ({len(text):,} characters)")
+    assert [e.stage for e in events] == [
+        "check",
+        "check",
+        "note",
+    ] and not caplog.messages
+
+
+def test_an_elevenlabs_retry_is_told_to_the_listener_or_logged(caplog):
+    from elevenlabs.core.api_error import ApiError
+
+    def tts(**kw):
+        answers = iter([ApiError(status_code=429, body={"detail": "busy"}), (b"audio", "r1")])  # fmt: skip
+
+        def convert(**_):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        return r.elevenlabs_tts(settings_obj(), convert=convert, sleep=lambda _: None, **kw)  # fmt: skip
+
+    told = []
+    assert tts(on_retry=told.append)("hello", []) == (b"audio", "r1")
+    assert told == ["ElevenLabs 429 {'detail': 'busy'}; retrying in 10s"]
+    assert not caplog.messages
+    assert tts()("hello", []) == (b"audio", "r1")
+    assert caplog.messages == told  # nobody listening: logged, in the same words
+
+
+def test_render_prints_why_an_episode_is_rendered_again_itself(project, capsys, caplog):
+    """The CLI listens to the render: the note is its own line on stderr, not the log's."""
+    root, _ = project
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    out = next((root / "Lectures").rglob("01 - *.mp3"))
+    out.write_bytes(out.read_bytes()[:-200])
+    capsys.readouterr()
+    assert main(["render", "algebra", "--episode", "1", "--yes"]) == 0
+    shown = capsys.readouterr()
+    said = f"{out} is 200 bytes short of what its header says; rendering it again\n"
+    assert shown.err == said and not caplog.messages
+    assert shown.out.count("Checking episode 1's cached pieces...") == 1

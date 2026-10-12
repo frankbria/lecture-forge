@@ -306,8 +306,10 @@ def complete(
     attempts: int = 4,
     base_delay: float = 10.0,
     sleep: Callable[[float], None] = time.sleep,
+    on_retry: Callable[[str], None] | None = None,
 ) -> str:
-    """Call a provider, retrying transient failures with exponential backoff.
+    """Call a provider, retrying transient failures with exponential backoff. A retry
+    about to wait is told to `on_retry`, or logged when nobody listens.
 
     On final failure the ProviderError lists the other usable providers, so the caller
     can offer to switch.
@@ -323,8 +325,8 @@ def complete(
                 e.alternatives = [p for p in available(settings) if p != provider]
                 raise
             delay = base_delay * 2**attempt
-            log.warning(
-                "%s; retrying in %.0fs (%d/%d)", e, delay, attempt + 1, attempts - 1
+            (on_retry or log.warning)(
+                f"{e}; retrying in {delay:.0f}s ({attempt + 1}/{attempts - 1})"
             )
             sleep(delay)
 
@@ -337,6 +339,7 @@ def complete_switching(
     *,
     choose: Callable[[ProviderError], str | None] | None = None,
     on_note: Callable[[str], None] = lambda _: None,
+    on_retry: Callable[[str], None] | None = None,
 ) -> tuple[str, Settings]:
     """complete() on settings.provider; once retries run out, `choose` may name one of the
     error's alternatives to switch to (None, or anything else, gives up).
@@ -346,7 +349,7 @@ def complete_switching(
     """
     while True:
         try:
-            text = complete(settings.provider, system, user, pdf, settings=settings)
+            text = complete(settings.provider, system, user, pdf, settings=settings, on_retry=on_retry)  # fmt: skip
             return text, settings
         except ProviderError as e:
             choice = choose(e) if choose and e.alternatives else None
