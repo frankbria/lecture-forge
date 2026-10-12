@@ -1507,6 +1507,8 @@ def test_an_mp3_says_how_many_bytes_it_should_have(tmp_path, beep):
     # least what is missing up to the end of the count.
     assert missing(beep[:40]) == tag + 64 - 40
     assert missing(beep[: at + 6]) == tag + 64 - (at + 6)
+    # A header that claims the largest tag there is: short by all of it.
+    assert missing(b"ID3\x04\x00\x00\x7f\x7f\x7f\x7f") == 0x0FFFFFFF + 64
     no_count = bytearray(beep[:-1])
     no_count[at + 7] &= ~2  # the flag that says a byte count follows
     assert missing(bytes(no_count)) == 0
@@ -1567,7 +1569,7 @@ def test_an_episode_cut_short_is_not_already_rendered(series, tmp_path, beep, ca
 
 
 def test_an_episode_cut_down_to_its_first_bytes_is_not_already_rendered(
-    series, tmp_path, beep
+    series, tmp_path, beep, caplog
 ):
     out = run(series, tmp_path, FakeTTS(beep)).path
     size = out.stat().st_size
@@ -1575,6 +1577,10 @@ def test_an_episode_cut_down_to_its_first_bytes_is_not_already_rendered(
     again = FakeTTS(beep)
     assert not run(series, tmp_path, again).skipped and again.calls == []
     assert out.stat().st_size == size
+    (said,) = caplog.messages
+    assert said.startswith(f"{out} is ") and said.endswith(
+        " bytes short of what its header says; rendering it again"
+    )
 
 
 def test_an_episode_cut_short_without_its_pieces_is_priced_before_it_is_paid_for(

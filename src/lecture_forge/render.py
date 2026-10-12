@@ -289,7 +289,7 @@ def _missing(mp3: Path) -> int:
     except OSError:  # missing, or locked by Dropbox: nothing to compare
         return 0
     if len(frame) < 64:  # it ends inside its ID3v2 tag, or before a first frame's count
-        return tag + 64 - size if tag else 0
+        return max(0, tag + 64 - size) if tag else 0  # 0: it grew while being read
     # The tag follows the frame's header and side info: MPEG 2 or 1, mono or stereo.
     for at in (13, 21, 36):
         if frame[at : at + 4] in (b"Info", b"Xing"):
