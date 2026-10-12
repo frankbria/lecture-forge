@@ -1301,7 +1301,6 @@ def test_only_series_that_continue_this_one_and_can_be_read_are_named(tmp_path, 
     broken.parent.mkdir()
     broken.write_text("continues: ch3\nepisodes: [", encoding="utf-8")
     (tmp_path / "series" / "notes.txt").write_text("not a series", encoding="utf-8")
-    (tmp_path / "series" / "no-plan").mkdir()
     binary = tmp_path / "series" / "binary" / "plan.yaml"
     binary.parent.mkdir()
     binary.write_bytes(b"\xff\xfe not UTF-8")
