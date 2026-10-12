@@ -1274,6 +1274,20 @@ def test_a_stale_first_episode_of_the_continuing_series_is_told_apart(tmp_path, 
     assert _after(tmp_path, **LAST) == [("ch4", 1, "stale")]
 
 
+def test_a_continuing_series_with_a_relative_source_is_found_from_anywhere(
+    tmp_path, book, monkeypatch
+):
+    """A relative source is under the project root, not under the folder `write` runs in."""
+    write_ch3(tmp_path, book)
+    write_ch4(tmp_path, book)
+    two = [(1, [1, 3]), (2, [4, 6])]
+    make_plan_file(tmp_path, book.name, two, series="ch4", continues="ch3")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert _after(tmp_path, **LAST) == [("ch4", 1, "current")]
+
+
 def test_only_series_that_continue_this_one_and_can_be_read_are_named(tmp_path, book):
     write_ch3(tmp_path, book)
     write_ch4(tmp_path, book)
@@ -1287,7 +1301,16 @@ def test_only_series_that_continue_this_one_and_can_be_read_are_named(tmp_path, 
     broken.parent.mkdir()
     broken.write_text("continues: ch3\nepisodes: [", encoding="utf-8")
     (tmp_path / "series" / "notes.txt").write_text("not a series", encoding="utf-8")
+    (tmp_path / "series" / "no-plan").mkdir()
+    binary = tmp_path / "series" / "binary" / "plan.yaml"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\xff\xfe not UTF-8")
+    (tmp_path / "series" / "folder" / "plan.yaml").mkdir(parents=True)
+    later = ((2, [1, 3]), (3, [4, 6]))  # a first episode that isn't number 1
+    run(tmp_path, book, lambda s, u, p: next(replies), n=2, episodes=later, series="odd", continues="ch3")  # fmt: skip
     assert make_plan_file(tmp_path, book, two, series="moved", continues="ch3")
     moved = tmp_path / "series" / "moved" / "plan.yaml"
     moved.write_text(moved.read_text().replace(str(book), "gone.pdf"), encoding="utf-8")
-    assert _after(tmp_path, **LAST) == [("ch4", 1, "current"), ("too", 1, "current")]
+    assert _after(tmp_path, **LAST) == [
+        ("ch4", 1, "current"), ("odd", 2, "current"), ("too", 1, "current")
+    ]  # fmt: skip

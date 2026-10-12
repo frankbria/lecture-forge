@@ -257,17 +257,44 @@ def test_a_continued_series_whose_plan_does_not_load_stops_before_planning(
 def test_rewriting_a_series_last_episode_names_the_series_that_continues_it(
     project, capsys
 ):
-    _, notes, _, _ = project
+    root, notes, _, _ = project
     main(["plan", str(notes), "--series", "ch3"])
     main(["write", "ch3", "--all", "--auto"])
-    main(["plan", str(notes), "--series", "ch4", "--continues", "ch3"])
+    # A source named from the project folder, as the owner types it.
+    main(["plan", "notes.md", "--series", "ch4", "--continues", "ch3"])
     main(["write", "ch4", "--episode", "1", "--auto"])
     capsys.readouterr()
     assert main(["write", "ch3", "--episode", "1", "--force", "--auto"]) == 0
     assert "series ch4" not in capsys.readouterr().out  # not ch3's last episode
     assert main(["write", "ch3", "--episode", "2", "--force", "--auto"]) == 0
-    old = "is built on the old summary and puzzle"
+    old = "note: episode 1 of series ch4 is built on the old summary and puzzle"
     assert (
-        f"  note: episode 1 of series ch4 {old}; rewrite it with --force if the recap "
-        "matters\n" in capsys.readouterr().out
+        f"  {old}; rewrite it with --force if the recap matters\n"
+        in capsys.readouterr().out
     )
+    plan = (
+        root / "series/ch4/plan.yaml"
+    )  # ch4's first episode gets another range: stale
+    plan.write_text(
+        plan.read_text().replace("- 1\n  - 2", "- 1\n  - 1"), encoding="utf-8"
+    )
+    assert main(["write", "ch3", "--episode", "2", "--force", "--auto"]) == 0
+    assert (
+        f"  {old} and no longer matches the plan; write it again (no --force needed)\n"
+        in capsys.readouterr().out
+    )
+
+
+def test_a_lost_summary_in_the_continued_series_is_a_note_at_plan_time(project, capsys):
+    root, notes, _, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    main(["write", "ch3", "--all", "--auto"])
+    (root / "series/ch3/episodes/02/summary.md").unlink()
+    capsys.readouterr()
+    assert main(["plan", str(notes), "--series", "ch4", "--continues", "ch3"]) == 0
+    assert capsys.readouterr().out.startswith(
+        "note: episode 2 of series ch3 has a script but no summary.md; rewrite it: "
+        "lecture-forge write ch3 --episode 2 --force. Until then the first episode of ch4 "
+        "can't be written.\n"
+    )
+    assert continues_of(root, "ch4") == "ch3"

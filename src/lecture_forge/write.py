@@ -390,7 +390,8 @@ def series_on_old_recap(
     episode of the series at series_dir: those whose plan says they continue it and whose
     first episode is written, each as (series, that episode's number, "current" or "stale").
     As in on_old_recap, a first write of ep counts, and nothing is rewritten. A plan next
-    door that doesn't load is passed over: nothing can be written from it either."""
+    door that can't be read is passed over: nothing can be written from it either, and a
+    note must never stop a write that has been paid for."""
     here = Path(series_dir)
     wrote = any(e["n"] == ep["n"] and action != "skip" for e, action, _ in todo)
     if not wrote or ep["n"] != plan["episodes"][-1]["n"]:
@@ -399,7 +400,7 @@ def series_on_old_recap(
     for path in sorted(here.parent.glob("*/plan.yaml")):
         try:
             theirs = load_plan(path, root=here.parent.parent)
-        except PlanError:
+        except (PlanError, OSError, ValueError):  # ValueError: not UTF-8
             continue
         if theirs["continues"] == here.name and theirs["episodes"]:
             first = theirs["episodes"][0]
