@@ -13,6 +13,8 @@ from lecture_forge.config import load_settings
 from lecture_forge.plan import (
     MAX_MINUTES,
     PlanError,
+    check_continues,
+    check_new_plan,
     load_plan,
     make_plan,
     parse_plan,
@@ -654,8 +656,6 @@ def test_reusable_plan_must_continue_the_series_asked_for(tmp_path, book):
 
 def test_a_plan_is_written_over_another_only_when_forced(tmp_path):
     """A front end asks before it spends a planning call; the plan may hold edits."""
-    from lecture_forge.plan import check_new_plan
-
     out = tmp_path / "series" / "s" / "plan.yaml"
     check_new_plan(out)  # nothing there: fine
     out.parent.mkdir(parents=True)
@@ -669,8 +669,6 @@ def test_a_plan_is_written_over_another_only_when_forced(tmp_path):
 
 
 def test_a_series_continues_only_another_series_that_is_planned(tmp_path):
-    from lecture_forge.plan import check_continues
-
     for series in ("ch3", "ch4"):
         (tmp_path / "series" / series).mkdir(parents=True)
     (tmp_path / "series" / "ch3" / "plan.yaml").write_text("x", encoding="utf-8")
