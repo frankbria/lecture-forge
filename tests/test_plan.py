@@ -82,6 +82,14 @@ def test_pdf_digest_marks_scanned_pages_instead_of_counting_zero_words(tmp_path)
     )
 
 
+def test_pdf_digest_marks_pages_whose_text_is_drawn_letter_by_letter(tmp_path):
+    src = open_source(scanned_pdf(tmp_path / "printed.pdf", "gvd"))
+    marked = "scanned page image, words not counted"
+    assert source_digest(src, 1, 3) == (
+        f"page 1: {marked}\npage 2: {marked}\npage 3: 0 words\n"
+    )
+
+
 def test_text_digest_numbers_each_line(notes):
     assert source_digest(notes, 3, 4) == "3| # Rings\n4| A ring is...\n"
 

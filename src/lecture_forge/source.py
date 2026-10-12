@@ -131,15 +131,19 @@ def extract_text(src: Source, start: int = 1, end: int | None = None) -> str:
 
 
 def _is_scan(page: pymupdf.Page) -> bool:
-    """An image over most of the page, with at most a stamped page number or scanner
-    footer as text."""
-    # ponytail: fixed thresholds; a full-page figure or cover with a short caption counts
+    """A page drawn, not typed: at most a stamped page number or scanner footer as text,
+    and an image over most of the page, or its text drawn letter by letter as small
+    images or outlines (Microsoft Print to PDF)."""
+    # ponytail: fixed thresholds; a full-page figure or cover with a short caption counts,
+    # and so does a drawing of 200 shapes, about three lines of drawn text
     if len(page.get_text().split()) > 10:
         return False
-    covered = sum(
-        abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()
+    images = page.get_image_info()
+    covered = sum(abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in images)
+    return (
+        covered >= 0.5 * abs(page.rect)
+        or len(images) + len(page.get_cdrawings()) >= 200
     )
-    return covered >= 0.5 * abs(page.rect)
 
 
 def scanned_pages(src: Source, start: int = 1, end: int | None = None) -> list[int]:

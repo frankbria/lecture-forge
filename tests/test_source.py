@@ -14,7 +14,8 @@ from lecture_forge.source import (
 def scanned_pdf(path, pages):
     """One page per letter: t has text, f text and a figure, s is a scan (a page image,
     no text layer), n a scan with a stamped page number, o an OCR'd scan (a page image
-    under an invisible text layer), b is blank."""
+    under an invisible text layer), b is blank. g and v have their text drawn letter by
+    letter, as 200 small images or 200 vector paths; d is a drawing of 199 paths."""
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False)
     pix.clear_with(200)
     doc = pymupdf.open()
@@ -31,6 +32,12 @@ def scanned_pdf(path, pages):
             page.insert_textbox(pymupdf.Rect(72, 72, 540, 760), ocr, render_mode=3)
         if kind == "n":
             page.insert_text((72, 820), "12  Scanned by HP 12 Oct 2026 14:32")
+        for i in range({"g": 200, "v": 200, "d": 199}.get(kind, 0)):
+            x, y = 72 + 10 * (i % 40), 72 + 14 * (i // 40)
+            if kind == "g":
+                page.insert_image(pymupdf.Rect(x, y, x + 8, y + 8), pixmap=pix)
+            else:
+                page.draw_line((x, y), (x + 8, y + 8))
     doc.save(path)
     return path
 
@@ -260,6 +267,14 @@ def test_scanned_pages_are_page_images_with_at_most_a_stamped_number(tmp_path):
     assert len(extract_text(src, 7, 7).split()) == 33  # counted like any text page
     assert scanned_pages(src, 3, 4) == [4]
     assert extract_text(src, 2, 2).strip() == ""  # what the planner can't count
+
+
+def test_text_drawn_letter_by_letter_is_a_scan_too(tmp_path):
+    """Microsoft Print to PDF leaves no text layer: each letter is a small image or an
+    outline. Those pages cover little of the page, so they are told by how many there are."""
+    src = open_source(scanned_pdf(tmp_path / "printed.pdf", "gvdb"))
+    assert extract_text(src).strip() == ""  # no page has a word to count
+    assert scanned_pages(src) == [1, 2]  # not the 199-path drawing or the blank page
 
 
 def test_text_sources_have_no_scanned_pages(notes):
