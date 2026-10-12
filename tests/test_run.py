@@ -145,10 +145,12 @@ def test_run_resumes_a_plan_for_the_chapter_asked_for(project, capsys):
 
 
 def test_plan_refuses_an_existing_plan_before_any_llm_call(project, capsys):
-    _, notes, llm, _ = project
+    root, notes, llm, _ = project
     assert main(["plan", str(notes), "--series", "ch3"]) == 0
+    planned = (root / "series/ch3/plan.yaml").read_text(encoding="utf-8")
     capsys.readouterr()
     assert main(["plan", str(notes), "--series", "ch3"]) == 1
+    assert (root / "series/ch3/plan.yaml").read_text(encoding="utf-8") == planned
     assert capsys.readouterr().err == (
         "error: series/ch3/plan.yaml exists and may hold your edits; pass --force to "
         "replace it\n"
