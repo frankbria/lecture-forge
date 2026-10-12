@@ -13,6 +13,8 @@ from lecture_forge.config import load_settings
 from lecture_forge.plan import (
     MAX_MINUTES,
     PlanError,
+    check_continues,
+    check_new_plan,
     load_plan,
     make_plan,
     parse_plan,
@@ -650,6 +652,37 @@ def test_reusable_plan_must_continue_the_series_asked_for(tmp_path, book):
     write_plan(planned, book, out, force=True, continues="ch3")
     assert reusable_plan(out, book.path, continues="ch3", **kw)["continues"] == "ch3"
     assert reusable_plan(out, book.path, **kw)["continues"] == "ch3"  # nothing asked
+
+
+def test_a_plan_is_written_over_another_only_when_forced(tmp_path):
+    """A front end asks before it spends a planning call; the plan may hold edits."""
+    out = tmp_path / "series" / "s" / "plan.yaml"
+    check_new_plan(out)  # nothing there: fine
+    out.parent.mkdir(parents=True)
+    out.write_text("title: mine\n", encoding="utf-8")
+    check_new_plan(out, force=True)
+    with pytest.raises(FileExistsError) as e:
+        check_new_plan(out)
+    held = f"{out} exists and may hold your edits"
+    assert str(e.value) == f"{held}; it is replaced only if you ask for that"
+    assert _worded(e.value) == f"{held}; pass --force to replace it"
+
+
+def test_a_series_continues_only_another_series_that_is_planned(tmp_path):
+    for series in ("ch3", "ch4"):
+        (tmp_path / "series" / series).mkdir(parents=True)
+    (tmp_path / "series" / "ch3" / "plan.yaml").write_text("x", encoding="utf-8")
+    (tmp_path / "series" / "ch4" / "plan.yaml").write_text("x", encoding="utf-8")
+    (tmp_path / "ch3").mkdir()  # what series/../ch3 would reach
+    (tmp_path / "ch3" / "plan.yaml").write_text("x", encoding="utf-8")
+    check_continues(tmp_path, "ch4", "ch3")
+    # not planned, itself, two paths that leave the series folder, and no name at all
+    for other in ("missing", "ch4", "../ch3", "ch3/x", ""):
+        with pytest.raises(PlanError) as e:
+            check_continues(tmp_path, "ch4", other)
+        assert str(e.value) == (
+            f"a series can only continue another series that has a plan.yaml, got {other!r}"
+        )
 
 
 def test_reusable_plan_resolves_a_relative_source_under_the_root(
