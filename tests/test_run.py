@@ -200,6 +200,20 @@ def test_run_continues_opens_the_series_with_the_others_last_episode(project):
     assert "previous series" not in draft2
 
 
+def test_run_names_its_flag_for_a_plan_that_does_not_continue_the_series(
+    project, capsys
+):
+    root, notes, llm, _ = project
+    main(["plan", str(notes), "--series", "ch3"])
+    main(["plan", str(notes), "--series", "ch4"])
+    assert main(["run", str(notes), "--series", "ch4", "--continues", "ch3"]) == 1
+    assert capsys.readouterr().err == (
+        "error: series/ch4/plan.yaml doesn't say `continues: ch3`; edit it to say so, or "
+        "leave out --continues\n"
+    )
+    assert len(llm) == 2  # the two plans: nothing was spent on the run
+
+
 def test_run_refuses_a_plan_that_does_not_continue_what_the_flag_says(project, capsys):
     root, notes, llm, _ = project
     main(["plan", str(notes), "--series", "ch3"])
