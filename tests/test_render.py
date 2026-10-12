@@ -1484,3 +1484,138 @@ def test_render_says_it_is_checking_cached_pieces_before_the_cost(project, capsy
     )  # the episode, not a piece
     assert lines[1].startswith("Episode 2: ") and "0 characters" in lines[1]
     assert lines.count(lines[0]) == 1  # once for the episode, not once for each piece
+
+
+# --- an episode cut short (#89) ----------------------------------------------------------
+
+
+def test_an_mp3_says_how_many_bytes_it_should_have(tmp_path, beep):
+    def missing(data):
+        (tmp_path / "x.mp3").write_bytes(data)
+        return r._missing(tmp_path / "x.mp3")
+
+    half = len(beep) // 2
+    assert missing(beep) == 0
+    assert missing(beep[:-1]) == 1 and missing(beep[:half]) == len(beep) - half
+    assert missing(beep + b"TAG" + bytes(125)) == 0  # a tag added at the end is no cut
+    # No count to compare, and not even a whole ID3v2 header: they say nothing.
+    assert missing(b"") == 0 and missing(b"<html>502</html>") == 0
+    assert missing(b"ID3") == 0
+    at = beep.index(b"Info")
+    tag = at - 21  # the ID3v2 tag, then 21 bytes of the first frame
+    # Cut inside the ID3v2 tag, or inside the frame that holds the count: short by at
+    # least what is missing up to the end of the count.
+    assert missing(beep[:40]) == tag + 64 - 40
+    assert missing(beep[: at + 6]) == tag + 64 - (at + 6)
+    # A header that claims the largest tag there is: short by all of it.
+    assert missing(b"ID3\x04\x00\x00\x7f\x7f\x7f\x7f") == 0x0FFFFFFF + 64
+    no_count = bytearray(beep[:-1])
+    no_count[at + 7] &= ~2  # the flag that says a byte count follows
+    assert missing(bytes(no_count)) == 0
+    assert r._missing(tmp_path / "gone.mp3") == 0 and r._missing(tmp_path) == 0
+
+
+ENCODINGS = {  # where the count sits depends on these: 21, 36 and 13 bytes into the frame
+    "mono": [],
+    "stereo": ["-ac", "2"],
+    "half the sample rate": ["-ar", "22050"],
+    "variable bit rate": ["-q:a", "5"],  # an Xing tag in place of Info
+    "an ID3v2.3 tag over 127 bytes": ["-id3v2_version", "3", "-metadata", "title=" + "T" * 200],
+    "no ID3v2 tag": ["-id3v2_version", "0"],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("encoding", ENCODINGS)
+def test_the_count_is_found_however_ffmpeg_encoded_the_mp3(tmp_path, encoding):
+    mp3 = tmp_path / "x.mp3"
+    tone = ["-f", "lavfi", "-i", "sine=frequency=440:duration=0.4"]
+    subprocess.run(
+        ["ffmpeg", "-loglevel", "error", *tone, *ENCODINGS[encoding], str(mp3)],
+        check=True,
+    )
+    assert r._missing(mp3) == 0
+    mp3.write_bytes(mp3.read_bytes()[:-7])
+    assert r._missing(mp3) == 7
+
+
+def test_an_episode_cut_short_is_not_already_rendered(series, tmp_path, beep, caplog):
+    """Part of the file is missing (damage on disk or in sync) beside a valid render.json:
+    200 bytes, far less than a decode would notice."""
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    size = out.stat().st_size
+    out.write_bytes(out.read_bytes()[:-200])
+    plan = load_plan(series / "plan.yaml")
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == 0
+    assert not caplog.messages  # the cost preview rebuilds nothing, so it says nothing
+    again = FakeTTS(beep)
+    result = run(series, tmp_path, again)
+    assert not result.skipped and again.calls == [] and result.reused == 2
+    assert out.stat().st_size == size  # rebuilt from the cached pieces
+    said = f"{out} is 200 bytes short of what its header says; rendering it again"
+    assert caplog.messages == [said]
+    assert run(series, tmp_path, FakeTTS(beep)).skipped
+    caplog.clear()
+    out.write_bytes(
+        out.read_bytes()[:-200]
+    )  # cut again, and the script edited as well:
+    script = episode_dir(series, 1) / "script.txt"
+    script.write_text(
+        script.read_text(encoding="utf-8") + "\nMore.\n", encoding="utf-8"
+    )
+    assert not run(series, tmp_path, FakeTTS(beep)).skipped
+    assert (
+        not caplog.messages
+    )  # rendered for the edit; the cut file was never a candidate
+
+
+def test_an_episode_cut_down_to_its_first_bytes_is_not_already_rendered(
+    series, tmp_path, beep, caplog
+):
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    size = out.stat().st_size
+    out.write_bytes(out.read_bytes()[:100])  # it ends inside its ID3v2 tag
+    again = FakeTTS(beep)
+    assert not run(series, tmp_path, again).skipped and again.calls == []
+    assert out.stat().st_size == size
+    (said,) = caplog.messages
+    assert said.startswith(f"{out} is ") and said.endswith(
+        " bytes short of what its header says; rendering it again"
+    )
+
+
+def test_an_episode_cut_short_without_its_pieces_is_priced_before_it_is_paid_for(
+    series, tmp_path, beep
+):
+    first = FakeTTS(beep)
+    out = run(series, tmp_path, first).path
+    out.write_bytes(out.read_bytes()[:-200])
+    for f in (episode_dir(series, 1) / "audio").iterdir():
+        f.unlink()
+    plan = load_plan(series / "plan.yaml")
+    # The preview and the render decide alike, or the render would pay without a yes.
+    sent = sum(len(text) for text, _ in first.calls)
+    assert r.cost(plan, plan["episodes"][0], series, settings(tmp_path)) == sent
+    assert run(series, tmp_path, FakeTTS(beep)).billed == sent
+
+
+@pytest.mark.parametrize("how", ["a tag added at the end", "written to a pipe"])
+def test_an_episode_no_shorter_than_it_says_still_counts(series, tmp_path, beep, how):
+    out = run(series, tmp_path, FakeTTS(beep)).path
+    if how == "a tag added at the end":  # another program's ID3v1 tag
+        out.write_bytes(out.read_bytes() + b"TAG" + bytes(125))
+    else:  # ffmpeg can't go back to fill in the count: nothing to compare the size with
+        copy = [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-i",
+            str(out),
+            "-c",
+            "copy",
+            "-f",
+            "mp3",
+            "-",
+        ]
+        out.write_bytes(subprocess.run(copy, capture_output=True, check=True).stdout)
+    calls, balance = readings()
+    assert run(series, tmp_path, FakeTTS(beep), balance=balance).skipped and calls == []
