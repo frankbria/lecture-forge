@@ -29,7 +29,7 @@ uv run ruff format --check .
 - `style_guide.py`: splits the owner's style guide into its parts
 - `providers.py`: LLM providers (claude-code, anthropic, openai), the retry policy, and provider switching (`complete_switching`, with a `choose` callback)
 - `plan.py`: episode planning and `plan.yaml` validation, series folders (`series_dir`), whether an existing plan can be reused (`reusable_plan`)
-- `progress.py`: the `Progress` events `make_plan`, `write_episode` and `render_episode` report through `on_progress`, before each slow step
+- `progress.py`: the `Progress` events `make_plan`, `write_episode` and `render_episode` report through `on_progress`, before each slow step, and the notes for the user (`tell`: an event, or the log when nobody listens)
 - `write.py`: script and critique passes, episode continuity, which episodes to write (`episodes_to_write`), which later ones a write leaves on an old recap (`on_old_recap`), and which series continuing this one (`series_on_old_recap`)
 - `render.py`: ElevenLabs TTS, piece cache, ffmpeg join and tags, the render cost and balance gate (`preflight`, `Preflight.check`)
 

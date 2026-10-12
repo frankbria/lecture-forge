@@ -303,7 +303,10 @@ def cmd_render(args: argparse.Namespace) -> None:
 
     # A decode per cached piece takes about a second: say so, once per episode.
     def show(event: Progress) -> None:
-        if event.episode not in checking:
+        # A note (a cached piece gone bad and what replacing it costs) is printed as it is.
+        if event.stage == "note":
+            print(event.note, file=sys.stderr)
+        elif event.episode not in checking:
             checking.add(event.episode)
             print(f"Checking episode {event.episode}'s cached pieces...", flush=True)
 
