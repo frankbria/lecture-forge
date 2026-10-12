@@ -624,6 +624,34 @@ def test_reusable_plan_must_hold_an_episode_in_the_part_asked_for(tmp_path, book
         )
 
 
+def test_reusable_plan_must_continue_the_series_asked_for(tmp_path, book):
+    """Or the series would be written without the recap the caller asked for."""
+    from lecture_forge.plan import reusable_plan
+
+    out = tmp_path / "series" / "ch4" / "plan.yaml"
+    kw = {"root": tmp_path}
+    assert reusable_plan(out, book.path, continues="ch3", **kw) is None  # no plan yet
+    planned = make_plan(book, GUIDE, 1, 6, lambda s, u, p: plan_json(episode(1, 6)))
+    wrong = f"{out} doesn't say `continues: ch3`"
+    for theirs in ("", "ch2"):  # a plan that continues nothing, then another series
+        write_plan(planned, book, out, force=True, continues=theirs)
+        assert (
+            reusable_plan(out, book.path, **kw)["continues"] == theirs
+        )  # nothing asked
+        with pytest.raises(PlanError) as e:
+            reusable_plan(out, book.path, continues="ch3", **kw)
+        assert (
+            str(e.value)
+            == f"{wrong}; edit it to say so, or don't ask to continue a series"
+        )
+        assert (
+            _worded(e.value) == f"{wrong}; edit it to say so, or leave out --continues"
+        )
+    write_plan(planned, book, out, force=True, continues="ch3")
+    assert reusable_plan(out, book.path, continues="ch3", **kw)["continues"] == "ch3"
+    assert reusable_plan(out, book.path, **kw)["continues"] == "ch3"  # nothing asked
+
+
 def test_reusable_plan_resolves_a_relative_source_under_the_root(
     tmp_path, monkeypatch, book
 ):

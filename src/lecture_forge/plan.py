@@ -343,13 +343,16 @@ def reusable_plan(
     *,
     root: str | Path = ".",
     part: tuple[int, int] | None = None,
+    continues: str = "",
 ) -> dict | None:
     """The plan at `path` if it was made for `source`, None if there is no plan yet.
 
     Raises PlanError for a plan made for another source, so a series is never written from
     the wrong book, and for a plan that can't be loaded (a broken one is not "no plan").
     With `part`, the (start, end) of the source now asked for, also for a plan with no
-    episode in it: that is another chapter's plan. Episodes edited past the part are fine."""
+    episode in it: that is another chapter's plan. Episodes edited past the part are fine.
+    With `continues`, the series the caller asks this one to continue, also for a plan that
+    names another or none: the series would be written without the recap asked for."""
     if not Path(path).exists():
         return None
     plan = load_plan(path, root=root)
@@ -369,5 +372,11 @@ def reusable_plan(
             "; use another series for {what}",
             "other_series",
             what="that part of the source",
+        )
+    if continues and plan["continues"] != continues:
+        raise advised(
+            PlanError(f"{path} doesn't say `continues: {continues}`"),
+            "; edit it to say so, or don't ask to continue a series",
+            "say_continues",
         )
     return plan

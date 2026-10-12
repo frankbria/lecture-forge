@@ -46,6 +46,7 @@ ADVICE = {
     "rewrite_episode": "; pass --force to rewrite it",
     "rewrite_recap": "; rewrite it: lecture-forge write {series} --episode {episode} --force",
     "other_series": "; use another --series for {what}",
+    "say_continues": "; edit it to say so, or leave out --continues",
     "write_episode": " (lecture-forge write)",
     "rewrite_stale": "; rewrite it: lecture-forge write {series} --episode {episode}",
     "smaller_part": (
@@ -365,14 +366,8 @@ def cmd_run(args: argparse.Namespace) -> None:
     if plan_path.exists() and (args.range, args.chapter) != (None, None):
         # or a mistyped --chapter would write and render the chapter planned before
         part = _part(args, open_source(args.source))
-    plan = reusable_plan(plan_path, args.source, root=ROOT, part=part)
+    plan = reusable_plan(plan_path, args.source, root=ROOT, part=part, continues=continues)  # fmt: skip
     if plan is not None:
-        if continues and plan["continues"] != continues:
-            # or the series would be written and rendered without the recap asked for
-            raise ValueError(
-                f"{plan_path} doesn't say `continues: {continues}`; edit it to say so, "
-                "or leave out --continues"
-            )
         print(f"Using the existing {plan_path} (delete it to plan again)")
     else:
         cmd_plan(argparse.Namespace(
