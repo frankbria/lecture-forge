@@ -376,7 +376,7 @@ def reusable_plan(
     if continues and plan["continues"] != continues:
         raise advised(
             PlanError(f"{path} doesn't say `continues: {continues}`"),
-            "; edit it to say so, or continue no series",
+            "; edit it to say so, or don't ask to continue a series",
             "say_continues",
         )
     return plan

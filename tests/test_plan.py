@@ -640,7 +640,10 @@ def test_reusable_plan_must_continue_the_series_asked_for(tmp_path, book):
         )  # nothing asked
         with pytest.raises(PlanError) as e:
             reusable_plan(out, book.path, continues="ch3", **kw)
-        assert str(e.value) == f"{wrong}; edit it to say so, or continue no series"
+        assert (
+            str(e.value)
+            == f"{wrong}; edit it to say so, or don't ask to continue a series"
+        )
         assert (
             _worded(e.value) == f"{wrong}; edit it to say so, or leave out --continues"
         )
