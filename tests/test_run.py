@@ -203,7 +203,7 @@ def test_run_continues_opens_the_series_with_the_others_last_episode(project):
 def test_run_names_its_flag_for_a_plan_that_does_not_continue_the_series(
     project, capsys
 ):
-    root, notes, llm, _ = project
+    _, notes, llm, _ = project
     main(["plan", str(notes), "--series", "ch3"])
     main(["plan", str(notes), "--series", "ch4"])
     assert main(["run", str(notes), "--series", "ch4", "--continues", "ch3"]) == 1
