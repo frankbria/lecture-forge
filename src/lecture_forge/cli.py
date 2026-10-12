@@ -29,8 +29,10 @@ from lecture_forge.source import (
 from lecture_forge.style_guide import StyleGuideError, load_style_guide
 from lecture_forge.write import (
     WriteError,
+    continued_recap,
     episodes_to_write,
     on_old_recap,
+    series_on_old_recap,
     write_episode,
 )
 
@@ -42,6 +44,7 @@ ROOT = Path(".")
 ADVICE = {
     "replace_plan": "; pass --force to replace it",
     "rewrite_episode": "; pass --force to rewrite it",
+    "rewrite_recap": "; rewrite it: lecture-forge write {series} --episode {episode} --force",
     "other_series": "; use another --series for {what}",
     "write_episode": " (lecture-forge write)",
     "rewrite_stale": "; rewrite it: lecture-forge write {series} --episode {episode}",
@@ -203,6 +206,14 @@ def cmd_plan(args: argparse.Namespace) -> None:
             f"{out} exists and may hold your edits; pass --force to replace it"
         )
     continues = _continues(args)
+    if continues:
+        try:  # their plan must load; a last episode not written yet is only worth saying
+            continued_recap(continues, out.parent)
+        except WriteError as e:
+            print(
+                f"note: {_worded(e)}. Until then the first episode of {args.series} "
+                "can't be written."
+            )
     settings = load_settings(root=ROOT)
     guide = load_style_guide(settings.style_guide_path)
     src = open_source(args.source)
@@ -271,6 +282,8 @@ def cmd_write(args: argparse.Namespace) -> None:
         for state, (one, several) in OLD_RECAP.items():
             if ns := [n for n, s in later if s == state]:
                 print(f"  note: {_episodes(ns)} {one if len(ns) == 1 else several}")
+        for series, n, state in series_on_old_recap(plan, series_dir, todo, ep):
+            print(f"  note: episode {n} of series {series} {OLD_RECAP[state][0]}")
     print("Review the script.txt files before rendering audio.")
 
 

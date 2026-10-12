@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from lecture_forge import providers
-from lecture_forge.cli import main
+from lecture_forge.cli import _worded, main
 from lecture_forge.config import load_settings
 from lecture_forge.plan import PlanError, load_plan
 from lecture_forge.style_guide import StyleGuide, load_style_guide
@@ -21,6 +21,7 @@ from lecture_forge.write import (
     on_old_recap,
     script_state,
     sections,
+    series_on_old_recap,
     stale_reason,
     write_episode,
 )
@@ -1196,3 +1197,119 @@ def test_write_one_written_episode_names_the_cli_flag(project, capsys):
         str(e.value)
         == "episode 1 is already written; it is rewritten only if you ask for that"
     )
+
+
+# --- a continued series (#93) -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "lost, named",
+    [
+        (["summary.md"], "summary.md"),
+        (["puzzle_answer.md"], "puzzle_answer.md"),
+        (["summary.md", "puzzle_answer.md"], "summary.md and puzzle_answer.md"),
+    ],
+)
+def test_a_lost_summary_or_puzzle_says_which_episode_to_rewrite(
+    tmp_path, book, lost, named
+):
+    """Both files are saved before script.txt, so one that is missing was lost since."""
+    write_ch3(tmp_path, book, upto=1)
+    for name in lost:
+        (episode_dir(tmp_path / "series" / "ch3", 1) / name).unlink()
+    with pytest.raises(WriteError) as e:
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), n=2, series="ch3")
+    wrong = f"episode 1 of series ch3 has a script but no {named}"
+    assert str(e.value) == f"{wrong}; rewrite it"
+    assert _worded(e.value) == (
+        f"{wrong}; rewrite it: lecture-forge write ch3 --episode 1 --force"
+    )
+
+
+def test_a_lost_summary_in_the_continued_series_names_that_series(tmp_path, book):
+    write_ch3(tmp_path, book)
+    (episode_dir(tmp_path / "series" / "ch3", 2) / "puzzle_answer.md").unlink()
+    with pytest.raises(WriteError) as e:
+        run(tmp_path, book, lambda s, u, p: pytest.fail("called"), series="ch4", continues="ch3")  # fmt: skip
+    assert str(e.value) == (
+        "episode 2 of series ch3 has a script but no puzzle_answer.md; rewrite it"
+    )
+
+
+def _after(tmp_path, n=2, **kw):
+    """series_on_old_recap for episode n of ch3, in the run that `kw` asks for."""
+    sdir = tmp_path / "series" / "ch3"
+    plan = load_plan(sdir / "plan.yaml")
+    todo = episodes_to_write(plan, sdir, **kw)
+    return series_on_old_recap(plan, sdir, todo, plan["episodes"][n - 1])
+
+
+LAST = {"episode": 2, "force": True}  # a run that rewrites ch3's last episode
+
+
+def test_a_series_that_continues_this_one_is_named_when_the_last_episode_is_written_again(
+    tmp_path, book
+):
+    write_ch3(tmp_path, book)
+    assert _after(tmp_path, **LAST) == []  # nothing continues ch3
+    two = [(1, [1, 3]), (2, [4, 6])]
+    make_plan_file(tmp_path, book, two, series="ch4", continues="ch3")
+    assert (
+        _after(tmp_path, **LAST) == []
+    )  # ch4 is planned; its first episode isn't written
+    write_ch4(tmp_path, book)
+    assert _after(tmp_path, **LAST) == [("ch4", 1, "current")]
+    assert _after(tmp_path, episode=None, force=True) == [("ch4", 1, "current")]
+    # Only for the last episode, and only when the run writes it.
+    assert _after(tmp_path, n=1, episode=1, force=True) == []
+    assert _after(tmp_path, episode=1, force=True) == []
+    assert _after(tmp_path, episode=None, force=False) == []
+
+
+def test_a_stale_first_episode_of_the_continuing_series_is_told_apart(tmp_path, book):
+    write_ch3(tmp_path, book)
+    write_ch4(tmp_path, book)
+    changed = [(1, [1, 2]), (2, [4, 6])]
+    make_plan_file(tmp_path, book, changed, series="ch4", continues="ch3")
+    assert _after(tmp_path, **LAST) == [("ch4", 1, "stale")]
+
+
+def test_a_continuing_series_with_a_relative_source_is_found_from_anywhere(
+    tmp_path, book, monkeypatch
+):
+    """A relative source is under the project root, not under the folder `write` runs in."""
+    write_ch3(tmp_path, book)
+    write_ch4(tmp_path, book)
+    two = [(1, [1, 3]), (2, [4, 6])]
+    make_plan_file(tmp_path, book.name, two, series="ch4", continues="ch3")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert _after(tmp_path, **LAST) == [("ch4", 1, "current")]
+
+
+def test_only_series_that_continue_this_one_and_can_be_read_are_named(tmp_path, book):
+    write_ch3(tmp_path, book)
+    write_ch4(tmp_path, book)
+    write_ch4(tmp_path, book, n=2)  # ch5 continues ch4, so ch4 must be finished
+    two = [(1, [1, 3]), (2, [4, 6])]
+    replies = itertools.cycle([draft_reply(), critique_reply()])
+    for series, top in [("ch5", {"continues": "ch4"}), ("other", {}), ("too", {"continues": "ch3"})]:  # fmt: skip
+        run(tmp_path, book, lambda s, u, p: next(replies), series=series, **top)
+    make_plan_file(tmp_path, book, [], series="empty", continues="ch3")
+    broken = tmp_path / "series" / "broken" / "plan.yaml"
+    broken.parent.mkdir()
+    broken.write_text("continues: ch3\nepisodes: [", encoding="utf-8")
+    (tmp_path / "series" / "notes.txt").write_text("not a series", encoding="utf-8")
+    binary = tmp_path / "series" / "binary" / "plan.yaml"
+    binary.parent.mkdir()
+    binary.write_bytes(b"\xff\xfe not UTF-8")
+    (tmp_path / "series" / "folder" / "plan.yaml").mkdir(parents=True)
+    later = ((2, [1, 3]), (3, [4, 6]))  # a first episode that isn't number 1
+    run(tmp_path, book, lambda s, u, p: next(replies), n=2, episodes=later, series="odd", continues="ch3")  # fmt: skip
+    assert make_plan_file(tmp_path, book, two, series="moved", continues="ch3")
+    moved = tmp_path / "series" / "moved" / "plan.yaml"
+    moved.write_text(moved.read_text().replace(str(book), "gone.pdf"), encoding="utf-8")
+    assert _after(tmp_path, **LAST) == [
+        ("ch4", 1, "current"), ("odd", 2, "current"), ("too", 1, "current")
+    ]  # fmt: skip
